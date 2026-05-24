@@ -1,0 +1,46 @@
+# Local development — mirrors Azure Container Apps Streamlit deployment
+services:
+  cost-advisor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: azure-cost-advisor:local
+    container_name: azure-cost-advisor
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      STREAMLIT_SERVER_PORT: "8501"
+      DATA_RAW_DIR: /app/data/raw
+      DATA_PROCESSED_DIR: /app/data/processed
+      DATA_EMBEDDINGS_DIR: /app/data/embeddings
+    volumes:
+      - ./data/raw:/app/data/raw
+      - ./data/processed:/app/data/processed
+      - ./data/embeddings:/app/data/embeddings
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+
+  # Optional: run collectors + processor before using the dashboard
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: azure-cost-advisor:local
+    profiles: ["pipeline"]
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./tests/mock_data:/app/tests/mock_data:ro
+    command: >
+      sh -c "python -m src.collector.run &&
+             python -m src.processor.run &&
+             python -m src.ai.run --build-index --skip-ai || true"
+    restart: "no"

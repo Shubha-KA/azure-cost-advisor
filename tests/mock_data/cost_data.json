@@ -1,0 +1,40 @@
+{
+  "metadata": {
+    "subscriptionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "apiVersion": "2023-11-01",
+    "datasetType": "ActualCost",
+    "generatedAt": "2025-05-20T08:00:00Z",
+    "source": "mock-cost-management-api"
+  },
+  "records": [
+    {"date": "2025-05-01", "resourceGroup": "rg-prod-web", "serviceName": "Virtual Machines", "location": "eastus", "costUSD": 38.42, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Production", "CostCenter": "CC-1001"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-prod-web", "serviceName": "Azure Application Gateway", "location": "eastus", "costUSD": 12.18, "usageQuantity": 720.0, "currency": "USD", "meterCategory": "Application Gateway", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-prod-web", "serviceName": "Azure App Service", "location": "eastus", "costUSD": 14.55, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "App Service", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-prod-data", "serviceName": "Azure SQL Database", "location": "eastus", "costUSD": 28.90, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "SQL Database", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-prod-data", "serviceName": "Virtual Network", "location": "eastus", "costUSD": 3.20, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Network", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-dev-lab", "serviceName": "Virtual Machines", "location": "westus2", "costUSD": 6.12, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Development"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-legacy", "serviceName": "Virtual Machines", "location": "centralus", "costUSD": 18.75, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Legacy"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-legacy", "serviceName": "Storage", "location": "centralus", "costUSD": 4.30, "usageQuantity": 50.0, "currency": "USD", "meterCategory": "Storage", "tags": {"Environment": "Legacy"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-aks-prod", "serviceName": "Azure Kubernetes Service", "location": "eastus", "costUSD": 52.40, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Azure Kubernetes Service", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-01", "resourceGroup": "rg-shared-net", "serviceName": "Virtual Network", "location": "eastus", "costUSD": 5.80, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Network", "tags": {"Environment": "Shared"}},
+    {"date": "2025-05-02", "resourceGroup": "rg-prod-web", "serviceName": "Virtual Machines", "location": "eastus", "costUSD": 39.10, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-02", "resourceGroup": "rg-prod-web", "serviceName": "Azure Application Gateway", "location": "eastus", "costUSD": 12.44, "usageQuantity": 720.0, "currency": "USD", "meterCategory": "Application Gateway", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-02", "resourceGroup": "rg-analytics", "serviceName": "Azure Databricks", "location": "eastus", "costUSD": 85.00, "usageQuantity": 24.0, "currency": "USD", "meterCategory": "Azure Databricks", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-03", "resourceGroup": "rg-prod-web", "serviceName": "Virtual Machines", "location": "eastus", "costUSD": 37.88, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-03", "resourceGroup": "rg-dev-lab", "serviceName": "Virtual Machines", "location": "westus2", "costUSD": 5.95, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Development"}},
+    {"date": "2025-05-03", "resourceGroup": "rg-aks-prod", "serviceName": "Azure Kubernetes Service", "location": "eastus", "costUSD": 51.20, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Azure Kubernetes Service", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-04", "resourceGroup": "rg-prod-data", "serviceName": "Azure SQL Database", "location": "eastus", "costUSD": 29.15, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "SQL Database", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-04", "resourceGroup": "rg-legacy", "serviceName": "Virtual Machines", "location": "centralus", "costUSD": 19.02, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Legacy"}},
+    {"date": "2025-05-05", "resourceGroup": "rg-prod-web", "serviceName": "Virtual Machines", "location": "eastus", "costUSD": 40.22, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-05", "resourceGroup": "rg-analytics", "serviceName": "Log Analytics", "location": "eastus", "costUSD": 11.30, "usageQuantity": 50.0, "currency": "USD", "meterCategory": "Log Analytics", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-06", "resourceGroup": "rg-shared-net", "serviceName": "Azure Application Gateway", "location": "eastus", "costUSD": 9.85, "usageQuantity": 720.0, "currency": "USD", "meterCategory": "Application Gateway", "tags": {"Environment": "Shared"}},
+    {"date": "2025-05-07", "resourceGroup": "rg-aks-prod", "serviceName": "Azure Kubernetes Service", "location": "eastus", "costUSD": 53.10, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Azure Kubernetes Service", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-08", "resourceGroup": "rg-dev-lab", "serviceName": "Storage", "location": "westus2", "costUSD": 2.15, "usageQuantity": 30.0, "currency": "USD", "meterCategory": "Storage", "tags": {"Environment": "Development"}},
+    {"date": "2025-05-09", "resourceGroup": "rg-prod-web", "serviceName": "Azure App Service", "location": "eastus", "costUSD": 14.80, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "App Service", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-10", "resourceGroup": "rg-analytics", "serviceName": "Azure Databricks", "location": "eastus", "costUSD": 210.50, "usageQuantity": 48.0, "currency": "USD", "meterCategory": "Azure Databricks", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-11", "resourceGroup": "rg-legacy", "serviceName": "Load Balancer", "location": "centralus", "costUSD": 7.40, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Load Balancer", "tags": {"Environment": "Legacy"}},
+    {"date": "2025-05-12", "resourceGroup": "rg-prod-web", "serviceName": "Virtual Machines", "location": "eastus", "costUSD": 38.95, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Machines", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-13", "resourceGroup": "rg-prod-data", "serviceName": "Virtual Network", "location": "eastus", "costUSD": 3.45, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Virtual Network", "tags": {"Environment": "Production"}},
+    {"date": "2025-05-14", "resourceGroup": "rg-aks-prod", "serviceName": "Azure Kubernetes Service", "location": "eastus", "costUSD": 50.80, "usageQuantity": 168.0, "currency": "USD", "meterCategory": "Azure Kubernetes Service", "tags": {"Environment": "Production"}}
+  ]
+}

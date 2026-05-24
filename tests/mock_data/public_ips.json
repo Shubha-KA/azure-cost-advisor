@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "subscriptionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "apiVersion": "2021-03-01",
+    "queryType": "ResourceGraph",
+    "generatedAt": "2025-05-20T09:20:00Z",
+    "source": "mock-resource-graph-api"
+  },
+  "publicIps": [
+    {
+      "name": "pip-orphan-dev-01",
+      "resourceGroup": "rg-dev-lab",
+      "location": "westus2",
+      "ipAddress": "20.42.118.55",
+      "allocationMethod": "Static",
+      "sku": "Standard",
+      "associated": false,
+      "associatedResource": null,
+      "monthlyCostEstimateUsd": 3.65
+    },
+    {
+      "name": "pip-orphan-legacy-lb",
+      "resourceGroup": "rg-legacy",
+      "location": "centralus",
+      "ipAddress": "52.167.88.12",
+      "allocationMethod": "Static",
+      "sku": "Standard",
+      "associated": false,
+      "associatedResource": null,
+      "monthlyCostEstimateUsd": 3.65
+    },
+    {
+      "name": "pip-prod-appgw",
+      "resourceGroup": "rg-prod-web",
+      "location": "eastus",
+      "ipAddress": "20.7.45.102",
+      "allocationMethod": "Static",
+      "sku": "Standard",
+      "associated": true,
+      "associatedResource": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Network/applicationGateways/appgw-prod",
+      "monthlyCostEstimateUsd": 3.65
+    },
+    {
+      "name": "pip-shared-nat",
+      "resourceGroup": "rg-shared-net",
+      "location": "eastus",
+      "ipAddress": "20.7.45.210",
+      "allocationMethod": "Static",
+      "sku": "Standard",
+      "associated": true,
+      "associatedResource": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-shared-net/providers/Microsoft.Network/natGateways/nat-hub",
+      "monthlyCostEstimateUsd": 3.65
+    },
+    {
+      "name": "pip-aks-ingress-unused",
+      "resourceGroup": "rg-aks-prod",
+      "location": "eastus",
+      "ipAddress": "20.7.46.88",
+      "allocationMethod": "Static",
+      "sku": "Standard",
+      "associated": false,
+      "associatedResource": null,
+      "monthlyCostEstimateUsd": 3.65
+    }
+  ]
+}

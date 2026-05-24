@@ -1,0 +1,81 @@
+# =============================================================================
+# Azure DevOps CI Pipeline — Build & Test (CI)
+# =============================================================================
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  pythonVersion: "3.11"
+  dockerRegistry: "costadvisor.azurecr.io"
+  imageRepository: "azure-cost-advisor"
+  imageTag: "$(Build.BuildId)"
+  workingDirectory: "$(Build.SourcesDirectory)/azure-cost-advisor"
+
+pool:
+  vmImage: "ubuntu-latest"
+
+jobs:
+  - job: RunTests
+    displayName: "Run Unit Tests & Analysis"
+    steps:
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: "$(pythonVersion)"
+        displayName: "Install Python $(pythonVersion)"
+
+      - script: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+        workingDirectory: $(workingDirectory)
+        displayName: "Install dependencies"
+
+      - script: |
+          python -m pytest tests/ -v --cov=src --cov-report=xml
+        workingDirectory: $(workingDirectory)
+        displayName: "Run pytest"
+        env:
+          AZURE_SUBSCRIPTION_ID: ""
+          AZURE_OPENAI_API_KEY: ""
+
+      - task: PublishTestResults@2
+        inputs:
+          testResultsFormat: "JUnit"
+          testResultsFiles: "**/test-results.xml"
+          mergeTestResults: true
+        condition: succeededOrFailed()
+        displayName: "Publish test results"
+
+      - task: PublishCodeCoverageResults@2
+        inputs:
+          summaryFileLocation: "$(workingDirectory)/coverage.xml"
+        condition: succeededOrFailed()
+        displayName: "Publish code coverage results"
+
+  - job: BuildAndPushDocker
+    displayName: "Build & Push Docker Image"
+    dependsOn: RunTests
+    condition: succeeded()
+    steps:
+      - task: Docker@2
+        displayName: "Build Docker Image"
+        inputs:
+          command: build
+          repository: $(imageRepository)
+          dockerfile: $(workingDirectory)/Dockerfile
+          buildContext: $(workingDirectory)
+          tags: |
+            $(imageTag)
+            latest
+
+      - task: Docker@2
+        displayName: "Push Image to ACR"
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+        inputs:
+          command: push
+          containerRegistry: "cost-advisor-acr-service-connection"
+          repository: $(imageRepository)
+          tags: |
+            $(imageTag)
+            latest

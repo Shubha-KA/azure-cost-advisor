@@ -1,0 +1,51 @@
+{
+  "metadata": {
+    "subscriptionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "apiVersion": "2021-03-01",
+    "queryType": "ResourceGraph",
+    "generatedAt": "2025-05-20T09:25:00Z",
+    "source": "mock-resource-graph-api"
+  },
+  "data": [
+    {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Network/virtualNetworks/vnet-prod",
+      "name": "vnet-prod",
+      "type": "microsoft.network/virtualnetworks",
+      "resourceGroup": "rg-prod-web",
+      "location": "eastus",
+      "properties": {"addressSpace": ["10.10.0.0/16"], "subnetCount": 4, "peerings": 2}
+    },
+    {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-shared-net/providers/Microsoft.Network/virtualNetworks/vnet-hub",
+      "name": "vnet-hub",
+      "type": "microsoft.network/virtualnetworks",
+      "resourceGroup": "rg-shared-net",
+      "location": "eastus",
+      "properties": {"addressSpace": ["10.0.0.0/16"], "subnetCount": 6, "peerings": 3}
+    },
+    {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Network/applicationGateways/appgw-prod",
+      "name": "appgw-prod",
+      "type": "microsoft.network/applicationgateways",
+      "resourceGroup": "rg-prod-web",
+      "location": "eastus",
+      "properties": {"sku": "WAF_v2", "tier": "WAF_v2", "capacity": 2}
+    },
+    {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-aks-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod-east",
+      "name": "aks-prod-east",
+      "type": "microsoft.containerservice/managedclusters",
+      "resourceGroup": "rg-aks-prod",
+      "location": "eastus",
+      "properties": {"kubernetesVersion": "1.29.7", "nodeCount": 7}
+    },
+    {
+      "id": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-shared-net/providers/Microsoft.Network/virtualNetworks/vnet-hub/virtualNetworkPeerings/peer-hub-to-spoke",
+      "name": "peer-hub-to-spoke",
+      "type": "microsoft.network/virtualnetworks/virtualnetworkpeerings",
+      "resourceGroup": "rg-shared-net",
+      "location": "eastus",
+      "properties": {"peeringState": "Connected", "remoteVnet": "vnet-spoke-west"}
+    }
+  ]
+}

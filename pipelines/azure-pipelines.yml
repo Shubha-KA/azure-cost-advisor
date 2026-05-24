@@ -1,0 +1,197 @@
+# Azure DevOps CI/CD — Azure Cost Optimization Advisor
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  pythonVersion: "3.11"
+  dockerRegistry: "costadvisor.azurecr.io"
+  imageRepository: "azure-cost-advisor"
+  imageTag: "$(Build.BuildId)"
+  terraformVersion: "1.5.7"
+  workingDirectory: "$(Build.SourcesDirectory)/azure-cost-advisor"
+
+stages:
+  - stage: BuildAndTest
+    displayName: "Build & Test"
+    jobs:
+      - job: PythonTests
+        displayName: "Python Unit Tests"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "$(pythonVersion)"
+            displayName: "Use Python $(pythonVersion)"
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt
+            workingDirectory: $(workingDirectory)
+            displayName: "Install dependencies"
+
+          - script: |
+              python -m pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+            workingDirectory: $(workingDirectory)
+            displayName: "Run pytest"
+            env:
+              AZURE_SUBSCRIPTION_ID: ""
+              AZURE_OPENAI_API_KEY: ""
+
+          - task: PublishTestResults@2
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "**/test-results.xml"
+              mergeTestResults: true
+            condition: succeededOrFailed()
+            displayName: "Publish test results (if configured)"
+
+          - task: PublishCodeCoverageResults@2
+            inputs:
+              summaryFileLocation: "$(workingDirectory)/coverage.xml"
+            condition: succeededOrFailed()
+            displayName: "Publish coverage"
+
+      - job: DockerBuild
+        displayName: "Build Docker Image"
+        dependsOn: PythonTests
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: Docker@2
+            displayName: "Build image"
+            inputs:
+              command: build
+              repository: $(imageRepository)
+              dockerfile: $(workingDirectory)/Dockerfile
+              buildContext: $(workingDirectory)
+              tags: |
+                $(imageTag)
+                latest
+
+          - task: Docker@2
+            displayName: "Push image to ACR"
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+            inputs:
+              command: push
+              containerRegistry: "cost-advisor-acr-service-connection"
+              repository: $(imageRepository)
+              tags: |
+                $(imageTag)
+                latest
+
+  - stage: TerraformPlan
+    displayName: "Terraform Plan"
+    dependsOn: BuildAndTest
+    condition: succeeded()
+    jobs:
+      - job: Plan
+        displayName: "Terraform Plan"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: "$(terraformVersion)"
+            displayName: "Install Terraform"
+
+          - task: AzureCLI@2
+            displayName: "Terraform Init & Plan"
+            inputs:
+              azureSubscription: "azure-cost-advisor-service-connection"
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              workingDirectory: $(workingDirectory)/infra
+              inlineScript: |
+                terraform init -input=false
+                terraform validate
+                terraform plan \
+                  -input=false \
+                  -var="docker_image=$(dockerRegistry)/$(imageRepository):$(imageTag)" \
+                  -var="streamlit_port=8501" \
+                  -var="azure_openai_api_key=$(AZURE_OPENAI_API_KEY)" \
+                  -out=tfplan
+            env:
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+              ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+
+          - publish: $(workingDirectory)/infra/tfplan
+            artifact: terraform-plan
+            displayName: "Publish Terraform plan"
+
+  - stage: TerraformApply
+    displayName: "Terraform Apply"
+    dependsOn: TerraformPlan
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: Apply
+        displayName: "Deploy Infrastructure"
+        environment: "production"
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: terraform-plan
+
+                - task: TerraformInstaller@1
+                  inputs:
+                    terraformVersion: "$(terraformVersion)"
+
+                - task: AzureCLI@2
+                  displayName: "Terraform Apply"
+                  inputs:
+                    azureSubscription: "azure-cost-advisor-service-connection"
+                    scriptType: "bash"
+                    scriptLocation: "inlineScript"
+                    workingDirectory: $(workingDirectory)/infra
+                    inlineScript: |
+                      terraform init -input=false
+                      terraform apply -input=false -auto-approve tfplan
+                  env:
+                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                    ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+                    ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+                    ARM_TENANT_ID: $(ARM_TENANT_ID)
+
+  - stage: RunPipeline
+    displayName: "Execute Cost Analysis Pipeline"
+    dependsOn: TerraformApply
+    condition: succeeded()
+    jobs:
+      - job: CollectAndAnalyze
+        displayName: "Collect & Analyze Costs"
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "$(pythonVersion)"
+
+          - script: |
+              pip install -r requirements.txt
+              python -m src.pipeline --skip-ai
+            workingDirectory: $(workingDirectory)
+            displayName: "Run cost analysis pipeline"
+            env:
+              AZURE_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+              AZURE_TENANT_ID: $(ARM_TENANT_ID)
+              AZURE_CLIENT_ID: $(ARM_CLIENT_ID)
+              AZURE_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+
+          - publish: $(workingDirectory)/data/processed
+            artifact: cost-analysis-results
+            displayName: "Publish analysis artifacts"

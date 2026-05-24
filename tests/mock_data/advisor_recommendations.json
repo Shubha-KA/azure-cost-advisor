@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "subscriptionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "apiVersion": "2023-01-01",
+    "datasetType": "Microsoft.Advisor/recommendations",
+    "generatedAt": "2025-05-20T10:00:00Z",
+    "source": "mock-azure-advisor-api"
+  },
+  "recommendations": [
+    {
+      "recommendationId": "rec-vm-rightsize-001",
+      "category": "Cost",
+      "impact": "High",
+      "impactedField": "Microsoft.Compute/virtualMachines",
+      "problem": "Virtual machine vm-legacy-01 is underutilized (avg CPU 2.5%). Consider a smaller SKU.",
+      "solution": "Resize from Standard_D8s_v3 to Standard_D2s_v3 or deallocate during off-hours.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-legacy/providers/Microsoft.Compute/virtualMachines/vm-legacy-01",
+      "resourceGroup": "rg-legacy",
+      "resourceName": "vm-legacy-01",
+      "monthlySavingsUsd": 285.00,
+      "lastUpdated": "2025-05-18T14:22:00Z"
+    },
+    {
+      "recommendationId": "rec-disk-delete-002",
+      "category": "Cost",
+      "impact": "High",
+      "impactedField": "Microsoft.Compute/disks",
+      "problem": "Unattached managed disk disk-orphan-sql-2019 has been idle for 127 days.",
+      "solution": "Create a snapshot if needed, then delete the unattached disk.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-legacy/providers/Microsoft.Compute/disks/disk-orphan-sql-2019",
+      "resourceGroup": "rg-legacy",
+      "resourceName": "disk-orphan-sql-2019",
+      "monthlySavingsUsd": 38.50,
+      "lastUpdated": "2025-05-19T08:10:00Z"
+    },
+    {
+      "recommendationId": "rec-pip-disassociate-003",
+      "category": "Cost",
+      "impact": "Medium",
+      "impactedField": "Microsoft.Network/publicIPAddresses",
+      "problem": "Public IP pip-orphan-dev-01 is not associated with any resource.",
+      "solution": "Delete unused public IP addresses to eliminate hourly charges.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-dev-lab/providers/Microsoft.Network/publicIPAddresses/pip-orphan-dev-01",
+      "resourceGroup": "rg-dev-lab",
+      "resourceName": "pip-orphan-dev-01",
+      "monthlySavingsUsd": 3.65,
+      "lastUpdated": "2025-05-17T11:45:00Z"
+    },
+    {
+      "recommendationId": "rec-aks-rightsize-004",
+      "category": "Cost",
+      "impact": "High",
+      "impactedField": "Microsoft.ContainerService/managedClusters",
+      "problem": "AKS cluster aks-dev-west node pool runs at 8.4% average CPU.",
+      "solution": "Reduce node count from 2 to 1 or switch to Spot node pool for dev workloads.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-dev-lab/providers/Microsoft.ContainerService/managedClusters/aks-dev-west",
+      "resourceGroup": "rg-dev-lab",
+      "resourceName": "aks-dev-west",
+      "monthlySavingsUsd": 206.00,
+      "lastUpdated": "2025-05-16T16:30:00Z"
+    },
+    {
+      "recommendationId": "rec-appgw-capacity-005",
+      "category": "Cost",
+      "impact": "Medium",
+      "impactedField": "Microsoft.Network/applicationGateways",
+      "problem": "Application Gateway appgw-prod is provisioned at WAF_v2 with excess capacity units.",
+      "solution": "Enable autoscaling and lower minimum capacity units based on traffic patterns.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Network/applicationGateways/appgw-prod",
+      "resourceGroup": "rg-prod-web",
+      "resourceName": "appgw-prod",
+      "monthlySavingsUsd": 95.00,
+      "lastUpdated": "2025-05-15T09:00:00Z"
+    },
+    {
+      "recommendationId": "rec-reserved-instance-006",
+      "category": "Cost",
+      "impact": "High",
+      "impactedField": "Microsoft.Compute/virtualMachines",
+      "problem": "VMs vm-web-01 and vm-web-02 show stable 7-day utilization above 55% CPU.",
+      "solution": "Purchase 1-year Reserved VM Instances for Standard_D4s_v5 in East US.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+      "resourceGroup": "rg-prod-web",
+      "resourceName": "vm-web-01",
+      "monthlySavingsUsd": 142.00,
+      "lastUpdated": "2025-05-14T12:00:00Z"
+    },
+    {
+      "recommendationId": "rec-sql-rightsize-007",
+      "category": "Cost",
+      "impact": "Medium",
+      "impactedField": "Microsoft.Sql/servers",
+      "problem": "Azure SQL Database on rg-prod-data is over-provisioned for current DTU consumption.",
+      "solution": "Downgrade from GP_Gen5_4 to GP_Gen5_2 after validating peak workload metrics.",
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-data/providers/Microsoft.Sql/servers/sql-prod/databases/appdb",
+      "resourceGroup": "rg-prod-data",
+      "resourceName": "appdb",
+      "monthlySavingsUsd": 68.00,
+      "lastUpdated": "2025-05-13T10:20:00Z"
+    }
+  ]
+}

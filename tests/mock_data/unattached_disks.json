@@ -1,0 +1,55 @@
+{
+  "metadata": {
+    "subscriptionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "apiVersion": "2021-03-01",
+    "queryType": "ResourceGraph",
+    "generatedAt": "2025-05-20T09:15:00Z",
+    "source": "mock-resource-graph-api"
+  },
+  "data": [
+    {
+      "diskId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-legacy/providers/Microsoft.Compute/disks/disk-orphan-sql-2019",
+      "resourceGroup": "rg-legacy",
+      "diskName": "disk-orphan-sql-2019",
+      "location": "centralus",
+      "diskSizeGb": 512,
+      "sku": "Premium_LRS",
+      "daysUnattached": 127,
+      "monthlyCostEstimateUsd": 38.50,
+      "managedBy": null
+    },
+    {
+      "diskId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-legacy/providers/Microsoft.Compute/disks/disk-old-app-data",
+      "resourceGroup": "rg-legacy",
+      "diskName": "disk-old-app-data",
+      "location": "centralus",
+      "diskSizeGb": 256,
+      "sku": "StandardSSD_LRS",
+      "daysUnattached": 64,
+      "monthlyCostEstimateUsd": 19.20,
+      "managedBy": null
+    },
+    {
+      "diskId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-dev-lab/providers/Microsoft.Compute/disks/disk-snapshot-leftover",
+      "resourceGroup": "rg-dev-lab",
+      "diskName": "disk-snapshot-leftover",
+      "location": "westus2",
+      "diskSizeGb": 128,
+      "sku": "Premium_LRS",
+      "daysUnattached": 22,
+      "monthlyCostEstimateUsd": 9.65,
+      "managedBy": null
+    },
+    {
+      "diskId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-data/providers/Microsoft.Compute/disks/disk-migration-temp",
+      "resourceGroup": "rg-prod-data",
+      "diskName": "disk-migration-temp",
+      "location": "eastus",
+      "diskSizeGb": 1024,
+      "sku": "Premium_ZRS",
+      "daysUnattached": 8,
+      "monthlyCostEstimateUsd": 72.40,
+      "managedBy": null
+    }
+  ]
+}

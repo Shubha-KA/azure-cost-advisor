@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "subscriptionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "apiVersion": "2018-01-01",
+    "datasetType": "Microsoft.Insights/metrics",
+    "generatedAt": "2025-05-20T09:00:00Z",
+    "source": "mock-azure-monitor-api"
+  },
+  "resources": [
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+      "resourceGroup": "rg-prod-web",
+      "resourceName": "vm-web-01",
+      "location": "eastus",
+      "vmSize": "Standard_D4s_v5",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 62.4, "maximum": 91.2, "minimum": 18.5, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 4294967296, "maximum": 8589934592, "minimum": 2147483648, "unit": "Bytes"},
+        "Network In Total": {"average": 45200000, "maximum": 120000000, "minimum": 5000000, "unit": "Bytes"}
+      }
+    },
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-web/providers/Microsoft.Compute/virtualMachines/vm-web-02",
+      "resourceGroup": "rg-prod-web",
+      "resourceName": "vm-web-02",
+      "location": "eastus",
+      "vmSize": "Standard_D4s_v5",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 58.1, "maximum": 88.0, "minimum": 15.2, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 3900000000, "maximum": 8000000000, "minimum": 2000000000, "unit": "Bytes"},
+        "Network In Total": {"average": 41000000, "maximum": 98000000, "minimum": 4000000, "unit": "Bytes"}
+      }
+    },
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-dev-lab/providers/Microsoft.Compute/virtualMachines/vm-dev-01",
+      "resourceGroup": "rg-dev-lab",
+      "resourceName": "vm-dev-01",
+      "location": "westus2",
+      "vmSize": "Standard_B2s",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 3.8, "maximum": 22.0, "minimum": 0.5, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 7200000000, "maximum": 7800000000, "minimum": 6500000000, "unit": "Bytes"},
+        "Network In Total": {"average": 1200000, "maximum": 8000000, "minimum": 100000, "unit": "Bytes"}
+      }
+    },
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-dev-lab/providers/Microsoft.Compute/virtualMachines/vm-dev-02",
+      "resourceGroup": "rg-dev-lab",
+      "resourceName": "vm-dev-02",
+      "location": "westus2",
+      "vmSize": "Standard_B2s",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 1.9, "maximum": 12.5, "minimum": 0.2, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 7400000000, "maximum": 7900000000, "minimum": 6800000000, "unit": "Bytes"},
+        "Network In Total": {"average": 800000, "maximum": 5000000, "minimum": 50000, "unit": "Bytes"}
+      }
+    },
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-legacy/providers/Microsoft.Compute/virtualMachines/vm-legacy-01",
+      "resourceGroup": "rg-legacy",
+      "resourceName": "vm-legacy-01",
+      "location": "centralus",
+      "vmSize": "Standard_D8s_v3",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 2.5, "maximum": 18.0, "minimum": 0.1, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 28000000000, "maximum": 30000000000, "minimum": 25000000000, "unit": "Bytes"},
+        "Network In Total": {"average": 2500000, "maximum": 15000000, "minimum": 200000, "unit": "Bytes"}
+      }
+    },
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-legacy/providers/Microsoft.Compute/virtualMachines/vm-legacy-02",
+      "resourceGroup": "rg-legacy",
+      "resourceName": "vm-legacy-02",
+      "location": "centralus",
+      "vmSize": "Standard_D4s_v3",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 1.2, "maximum": 9.5, "minimum": 0.0, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 14000000000, "maximum": 15000000000, "minimum": 12000000000, "unit": "Bytes"},
+        "Network In Total": {"average": 900000, "maximum": 6000000, "minimum": 100000, "unit": "Bytes"}
+      }
+    },
+    {
+      "resourceId": "/subscriptions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/resourceGroups/rg-prod-data/providers/Microsoft.Compute/virtualMachines/vm-etl-01",
+      "resourceGroup": "rg-prod-data",
+      "resourceName": "vm-etl-01",
+      "location": "eastus",
+      "vmSize": "Standard_E4s_v5",
+      "timeRange": {"start": "2025-05-13T00:00:00Z", "end": "2025-05-20T00:00:00Z"},
+      "metrics": {
+        "Percentage CPU": {"average": 45.0, "maximum": 78.0, "minimum": 12.0, "unit": "Percent"},
+        "Available Memory Bytes": {"average": 6000000000, "maximum": 9000000000, "minimum": 3000000000, "unit": "Bytes"},
+        "Network In Total": {"average": 28000000, "maximum": 75000000, "minimum": 3000000, "unit": "Bytes"}
+      }
+    }
+  ]
+}
