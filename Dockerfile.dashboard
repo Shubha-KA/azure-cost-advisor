@@ -1,0 +1,15 @@
+FROM python:3.11-slim AS base
+WORKDIR /app
+# Install system dependencies for FAISS & Azure SDKs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl && rm -rf /var/lib/apt/lists/*
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+# Copy source code (read‑only)
+COPY src ./src
+COPY data ./data
+# Set Streamlit dark theme via environment variable (optional, can be overridden)
+ENV STREAMLIT_THEME=dark
+EXPOSE 8501
+ENTRYPOINT ["streamlit", "run", "src/dashboard/app.py", "--server.port", "8501"]

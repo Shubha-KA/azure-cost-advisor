@@ -3,7 +3,7 @@ services:
   cost-advisor:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dashboard
     image: azure-cost-advisor:local
     container_name: azure-cost-advisor
     ports:
@@ -31,7 +31,7 @@ services:
   pipeline:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.pipeline
     image: azure-cost-advisor:local
     profiles: ["pipeline"]
     env_file:

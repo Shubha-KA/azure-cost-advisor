@@ -115,28 +115,27 @@ def _parse_dollar(value: str) -> float:
 
 
 def _render_card(card: dict) -> None:
+def _render_card(card: dict) -> None:
+    """Render a recommendation card using safe markdown.
+
+    This version avoids embedding raw HTML to prevent unsafe rendering.
+    """
     level = card.get("level", "medium")
-    css_class = f"rec-card rec-card-{level}"
-    savings_html = (
-        f'<div class="rec-card-savings">Estimated savings: ${card["savings"]:,.0f}/month</div>'
-        if card.get("savings", 0) > 0
-        else ""
-    )
-    metrics_html = (
-        f'<div class="rec-card-body" style="margin-top:0.25rem;font-size:0.8rem;">{card["metrics"]}</div>'
-        if card.get("metrics")
-        else ""
-    )
-    st.markdown(
-        f"""
-        <div class="{css_class}">
-            <div class="rec-card-title">{card["title"]}
-                <span class="status-pill pill-{level}">{level.upper()}</span>
-            </div>
-            <div class="rec-card-body">{card["body"]}</div>
-            {metrics_html}
-            {savings_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Build markdown content safely
+    title_md = f"### {card.get('title', '')}"
+    body_md = card.get("body", "")
+    metrics_md = card.get("metrics", "")
+    savings = card.get("savings", 0)
+    # Assemble parts
+    parts = [title_md]
+    if body_md:
+        parts.append(body_md)
+    if metrics_md:
+        parts.append(metrics_md)
+    if savings > 0:
+        parts.append(f"**Estimated savings:** ${savings:,.0f}/month")
+    # Add a level badge as plain text
+    parts.append(f"*Level: {level.upper()}*")
+    md_content = "\n\n".join(parts)
+    st.markdown(md_content)
+

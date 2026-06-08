@@ -236,39 +236,13 @@ class DataNormalizer:
         return pd.DataFrame(rows)
 
     def _normalize_other_costs(self, costs: dict[str, Any]) -> pd.DataFrame:
-        """Add non-VM services as aggregate resources not covered elsewhere."""
-        records = costs.get("records", [])
-        if not records:
-            return pd.DataFrame()
-        df = pd.DataFrame(records)
-        skip_services = {"Virtual Machines"}
-        monthly = (
-            df[~df["serviceName"].isin(skip_services)]
-            .groupby("serviceName", as_index=False)
-            .agg(monthly_cost=("costUSD", "sum"), resourceGroup=("resourceGroup", "first"))
-        )
-        rows = []
-        for _, row in monthly.iterrows():
-            svc = row["serviceName"]
-            rows.append(
-                {
-                    "resource_name": f"{svc.lower().replace(' ', '-')}-aggregate",
-                    "resource_type": svc,
-                    "resource_group": row["resourceGroup"],
-                    "monthly_cost": round(float(row["monthly_cost"]), 2),
-                    "cpu_avg_percent": 0.0,
-                    "memory_avg_percent": 0.0,
-                    "waste_level": "NONE",
-                    "recommendation": "",
-                    "estimated_savings": 0.0,
-                    "disk_state": None,
-                    "attached": None,
-                    "node_utilization": None,
-                    "anomaly": False,
-                    "rule_id": None,
-                }
-            )
-        return pd.DataFrame(rows)
+        """Skip creation of aggregate cost rows. Returns an empty DataFrame.
+        The cost aggregation is handled elsewhere (e.g., reporting layer)."""
+        # Previously this method generated synthetic "*-aggregate" resources for services like
+        # Azure App Service, DNS, etc. Those rows were confusing because they appear as real
+        # resources in the dashboard. By returning an empty DataFrame we avoid polluting the
+        # resource list with placeholder entries.
+        return pd.DataFrame()
 
     def _apply_defaults(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in ENRICHED_COLUMNS:
@@ -292,6 +266,17 @@ class DataNormalizer:
     def _validate_schema(self, df: pd.DataFrame) -> pd.DataFrame:
         missing = [c for c in CANONICAL_COLUMNS if c not in df.columns]
         if missing:
+            raise ProcessorError(f"Normalized DataFrame missing columns: {missing}")
+        # Allow empty DataFrames – upstream collectors may return no resources.
+        # This is expected when the Azure subscription has no resources or permissions are limited.
+        # Previously we raised an error here, which broke the pipeline after disabling aggregates.
+        # Instead, we log a warning and return the empty DataFrame.
+        if df.empty:
+            logger.warning("Normalized DataFrame is empty – no resources found.")
+            return df
+        if df["resource_name"].isna().any():
+            raise ProcessorError("resource_name contains null values")
+        return df
             raise ProcessorError(f"Normalized DataFrame missing columns: {missing}")
         if df.empty:
             raise ProcessorError("Normalized DataFrame is empty")

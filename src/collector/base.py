@@ -70,10 +70,24 @@ class BaseCollector(ABC, Generic[T]):
         self.logger.info("Starting collection for %s", self.collector_name)
         start = time.perf_counter()
 
+        is_live = False
         try:
-            raw_payload = self._load_mock_json()
+            if self.settings.azure_credentials_configured:
+                try:
+                    self.logger.info("Fetching LIVE data from Azure API...")
+                    raw_payload = self._fetch_live_data()
+                    is_live = True
+                except NotImplementedError:
+                    self.logger.warning("Live fetch not implemented for %s. Falling back to mock.", self.collector_name)
+                    raw_payload = self._load_mock_json()
+                except Exception as exc:
+                    self.logger.error("Live fetch failed for %s: %s. Falling back to mock.", self.collector_name, exc)
+                    raw_payload = self._load_mock_json()
+            else:
+                raw_payload = self._load_mock_json()
+
             validated = self._validate_schema(raw_payload)
-            enriched = self._simulate_api_ingestion(validated)
+            enriched = self._simulate_api_ingestion(validated, is_live=is_live)
             output_path, latest_path = self._save_outputs(enriched, validated)
 
             elapsed = time.perf_counter() - start
@@ -102,6 +116,10 @@ class BaseCollector(ABC, Generic[T]):
         except Exception as exc:
             self.logger.exception("%s failed unexpectedly", self.collector_name)
             raise CollectorError(f"{self.collector_name}: {exc}") from exc
+
+    def _fetch_live_data(self) -> dict[str, Any]:
+        """Fetch live data using Azure SDK and format into the expected raw dictionary payload."""
+        raise NotImplementedError(f"{self.collector_name} live fetch not implemented.")
 
     def _load_mock_json(self) -> dict[str, Any]:
         path = self.mock_file_path
@@ -139,7 +157,7 @@ class BaseCollector(ABC, Generic[T]):
             )
             raise SchemaValidationError(self.collector_name, error_list) from exc
 
-    def _simulate_api_ingestion(self, validated: T) -> dict[str, Any]:
+    def _simulate_api_ingestion(self, validated: T, is_live: bool = False) -> dict[str, Any]:
         """Wrap validated data with Azure API–style ingestion envelope."""
         now = datetime.now(timezone.utc)
         ingestion_id = f"{self.collector_name}-{now.strftime('%Y%m%d%H%M%S%f')}"
@@ -149,8 +167,8 @@ class BaseCollector(ABC, Generic[T]):
             "ingestionId": ingestion_id,
             "ingestedAt": now.isoformat(),
             "collector": self.collector_name,
-            "simulatedApi": True,
-            "mockSource": self.mock_filename,
+            "simulatedApi": not is_live,
+            "mockSource": None if is_live else self.mock_filename,
             "subscriptionId": self._extract_subscription_id(validated),
         }
         self._apply_ingestion_transforms(body)

@@ -41,7 +41,7 @@ class CostRecord(BaseModel):
 
 class CostDataPayload(BaseModel):
     metadata: MockMetadata
-    records: list[CostRecord] = Field(min_length=1)
+    records: list[CostRecord]
 
 
 class MetricValues(BaseModel):
@@ -65,7 +65,7 @@ class VmMetricResource(BaseModel):
 
 class VmMetricsPayload(BaseModel):
     metadata: MockMetadata
-    resources: list[VmMetricResource] = Field(min_length=1)
+    resources: list[VmMetricResource]
 
 
 class UnattachedDisk(BaseModel):
@@ -84,7 +84,7 @@ class UnattachedDisk(BaseModel):
 
 class UnattachedDisksPayload(BaseModel):
     metadata: MockMetadata
-    data: list[UnattachedDisk] = Field(min_length=1)
+    data: list[UnattachedDisk]
 
 
 class PublicIpRecord(BaseModel):
@@ -103,7 +103,7 @@ class PublicIpRecord(BaseModel):
 
 class PublicIpsPayload(BaseModel):
     metadata: MockMetadata
-    public_ips: list[PublicIpRecord] = Field(min_length=1, alias="publicIps")
+    public_ips: list[PublicIpRecord] = Field(alias="publicIps")
 
     model_config = {"populate_by_name": True}
 
@@ -132,7 +132,7 @@ class AksClusterMetrics(BaseModel):
 
 class AksMetricsPayload(BaseModel):
     metadata: MockMetadata
-    clusters: list[AksClusterMetrics] = Field(min_length=1)
+    clusters: list[AksClusterMetrics]
 
 
 class AdvisorRecommendation(BaseModel):
@@ -153,7 +153,7 @@ class AdvisorRecommendation(BaseModel):
 
 class AdvisorRecommendationsPayload(BaseModel):
     metadata: MockMetadata
-    recommendations: list[AdvisorRecommendation] = Field(min_length=1)
+    recommendations: list[AdvisorRecommendation]
 
 
 class ResourceGraphRow(BaseModel):
@@ -169,4 +169,4 @@ class ResourceGraphRow(BaseModel):
 
 class ResourceGraphPayload(BaseModel):
     metadata: MockMetadata
-    data: list[ResourceGraphRow] = Field(min_length=1)
+    data: list[ResourceGraphRow]

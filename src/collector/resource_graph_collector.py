@@ -70,12 +70,12 @@ class ResourceGraphCollector(BaseCollector[Any]):
 
     def _validate_schema(self, payload: dict[str, Any]) -> dict[str, Any]:
         MockMetadata.model_validate(payload["metadata"])
-        if not payload.get("unattachedDisks"):
-            raise CollectorError(f"{self.collector_name}: unattachedDisks is empty")
-        if not payload.get("publicIps"):
-            raise CollectorError(f"{self.collector_name}: publicIps is empty")
-        if not payload.get("resourceInventory"):
-            raise CollectorError(f"{self.collector_name}: resourceInventory is empty")
+        if payload.get("unattachedDisks") is None:
+            raise CollectorError(f"{self.collector_name}: unattachedDisks is missing")
+        if payload.get("publicIps") is None:
+            raise CollectorError(f"{self.collector_name}: publicIps is missing")
+        if payload.get("resourceInventory") is None:
+            raise CollectorError(f"{self.collector_name}: resourceInventory is missing")
         return payload
 
     def _count_records(self, validated: dict[str, Any]) -> int:
@@ -85,7 +85,61 @@ class ResourceGraphCollector(BaseCollector[Any]):
             + len(validated["resourceInventory"])
         )
 
-    def _simulate_api_ingestion(self, validated: dict[str, Any]) -> dict[str, Any]:
+    def _fetch_live_data(self) -> dict[str, Any]:
+        from src.collector.auth import get_azure_credential
+        from azure.mgmt.resourcegraph import ResourceGraphClient
+        from azure.mgmt.resourcegraph.models import QueryRequest
+
+        credential = get_azure_credential()
+        client = ResourceGraphClient(credential)
+        sub_id = self.settings.azure_subscription_id
+        subs = [sub_id]
+
+        # 1. Unattached Disks
+        disks_q = """
+        Resources 
+        | where type =~ 'microsoft.compute/disks' 
+        | where properties.diskState == 'Unattached' 
+        | project diskId=id, resourceGroup, diskName=name, location, diskSizeGb=toint(properties.diskSizeGB), sku=tostring(sku.name), managedBy=tostring(properties.managedBy)
+        """
+        disks_res = client.resources(QueryRequest(subscriptions=subs, query=disks_q))
+        disks_data = []
+        for d in disks_res.data:
+            d["daysUnattached"] = 30  # Simulate since ARG doesn't expose it directly
+            d["monthlyCostEstimateUsd"] = float(d.get("diskSizeGb", 0)) * 0.15
+            disks_data.append(d)
+
+        # 2. Public IPs
+        ips_q = """
+        Resources 
+        | where type =~ 'microsoft.network/publicipaddresses' 
+        | project name, resourceGroup, location, ipAddress=tostring(properties.ipAddress), allocationMethod=tostring(properties.publicIPAllocationMethod), sku=tostring(sku.name), associated=isnotempty(properties.ipConfiguration), associatedResource=tostring(properties.ipConfiguration.id)
+        """
+        ips_res = client.resources(QueryRequest(subscriptions=subs, query=ips_q))
+        ips_data = []
+        for ip in ips_res.data:
+            ip["monthlyCostEstimateUsd"] = 3.65 if not ip["associated"] else 0.0
+            ips_data.append(ip)
+
+        # 3. Inventory
+        inv_q = "Resources | project id, name, type, resourceGroup, location, properties | limit 1000"
+        inv_res = client.resources(QueryRequest(subscriptions=subs, query=inv_q))
+        
+        inv_data = inv_res.data
+
+        return {
+            "metadata": {
+                "subscriptionId": sub_id,
+                "apiVersion": "2021-03-01",
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+                "source": "live"
+            },
+            "unattachedDisks": disks_data,
+            "publicIps": ips_data,
+            "resourceInventory": inv_data,
+        }
+
+    def _simulate_api_ingestion(self, validated: dict[str, Any], is_live: bool = False) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         ingestion_id = f"{self.collector_name}-{now.strftime('%Y%m%d%H%M%S%f')}"
 
@@ -95,8 +149,8 @@ class ResourceGraphCollector(BaseCollector[Any]):
                 "ingestionId": ingestion_id,
                 "ingestedAt": now.isoformat(),
                 "collector": self.collector_name,
-                "simulatedApi": True,
-                "mockSources": [
+                "simulatedApi": not is_live,
+                "mockSources": None if is_live else [
                     "unattached_disks.json",
                     "public_ips.json",
                     "resource_graph_inventory.json",
