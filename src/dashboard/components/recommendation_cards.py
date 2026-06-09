@@ -115,7 +115,7 @@ def _parse_dollar(value: str) -> float:
 
 
 def _render_card(card: dict) -> None:
-def _render_card(card: dict) -> None:
+
     """Render a recommendation card using safe markdown.
 
     This version avoids embedding raw HTML to prevent unsafe rendering.
