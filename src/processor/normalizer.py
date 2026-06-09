@@ -277,9 +277,4 @@ class DataNormalizer:
         if df["resource_name"].isna().any():
             raise ProcessorError("resource_name contains null values")
         return df
-            raise ProcessorError(f"Normalized DataFrame missing columns: {missing}")
-        if df.empty:
-            raise ProcessorError("Normalized DataFrame is empty")
-        if df["resource_name"].isna().any():
-            raise ProcessorError("resource_name contains null values")
-        return df
+
