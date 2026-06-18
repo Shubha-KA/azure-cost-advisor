@@ -1,4 +1,0 @@
-# .github/workflows/ci-cd.yml
-# DEPRECATED: This workflow has been replaced by main.yml
-# This file is intentionally left empty to avoid duplicate triggers.
-# Please use .github/workflows/main.yml as the orchestrator workflow.
