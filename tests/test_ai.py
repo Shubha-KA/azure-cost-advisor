@@ -116,7 +116,7 @@ def test_rule_based_savings_question(
     advisor = FinOpsAdvisor(test_settings)
     answer = advisor.ask("What are my biggest savings opportunities?")
     assert "savings" in answer.lower()
-    assert "$" in answer
+    assert "USD" in answer
 
 
 def test_rule_based_recommendations(

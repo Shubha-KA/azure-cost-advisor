@@ -10,12 +10,13 @@ import pytest
 
 from src.collector.run import run_all
 from src.config import Settings
+from src.dashboard.data_loader import DashboardDataLoader
 from src.processor.anomaly_detector import AnomalyDetector
 from src.processor.normalizer import DataNormalizer, ProcessorError
 from src.processor.report_generator import ReportGenerator
-from src.processor.run import run_processing
+from src.processor.run import _reconcile_costs, run_processing
 from src.processor.savings_estimator import SavingsEstimator
-from src.processor.schemas import CANONICAL_COLUMNS
+from src.processor.schemas import CANONICAL_COLUMNS, COST_FACT_COLUMNS
 from src.processor.waste_detector import WasteDetector
 
 
@@ -39,6 +40,23 @@ def test_normalizer_produces_canonical_schema(
     for col in CANONICAL_COLUMNS:
         assert col in df.columns
     assert len(df) >= 1
+
+
+def test_cost_normalizer_preserves_all_records(
+    test_settings: Settings, seeded_raw_data: Path
+) -> None:
+    normalizer = DataNormalizer(test_settings)
+    payload = normalizer.loader.load("costs")
+    facts = normalizer.normalize_cost_facts(payload)
+
+    assert list(facts.columns) == COST_FACT_COLUMNS
+    assert len(facts) == len(payload["records"])
+    assert facts["cost_amount"].sum() == pytest.approx(
+        sum(
+            record.get("costAmount", record.get("costUSD", 0))
+            for record in payload["records"]
+        )
+    )
 
 
 def test_oversized_vm_rule(test_settings: Settings, seeded_raw_data: Path) -> None:
@@ -99,10 +117,53 @@ def test_run_processing_exports(test_settings: Settings, seeded_raw_data: Path) 
     config_module._settings = test_settings
     _, report = run_processing()
     assert report.resource_count >= 1
+    assert report.raw_cost_record_count == report.cost_fact_count
+    assert report.raw_totals == report.processed_totals
+    assert report.processed_totals == report.summary_totals
+    assert report.reconciliation_status == "passed"
     assert (test_settings.processed_path / "resources_latest.csv").exists()
     assert (test_settings.processed_path / "resources_latest.json").exists()
+    assert (test_settings.processed_path / "cost_facts_latest.csv").exists()
+    assert (test_settings.processed_path / "cost_facts_latest.json").exists()
     assert (test_settings.processed_path / "summary_latest.json").exists()
     assert (test_settings.processed_path / "report_latest.md").exists()
+
+    dashboard = DashboardDataLoader(test_settings).load()
+    assert len(dashboard.cost_facts) == report.cost_fact_count
+    assert dashboard.total_costs == report.summary_totals
+    assert dashboard.savings_totals == report.total_estimated_savings
+
+
+def test_live_cost_records_cannot_normalize_to_empty() -> None:
+    payload = {
+        "metadata": {"source": "live"},
+        "records": [{"costUSD": 12.5}],
+    }
+    empty_facts = pd.DataFrame(columns=COST_FACT_COLUMNS)
+
+    with pytest.raises(
+        ProcessorError,
+        match="Live Cost Management records exist but processed cost facts are empty",
+    ):
+        _reconcile_costs(payload, empty_facts)
+
+
+def test_reconciliation_keeps_currency_totals_separate() -> None:
+    payload = {
+        "metadata": {"source": "live"},
+        "records": [
+            {"costAmount": 10, "currency": "USD"},
+            {"costAmount": 20, "currency": "INR"},
+        ],
+    }
+    facts = pd.DataFrame(
+        [
+            {"cost_amount": 10, "currency": "USD"},
+            {"cost_amount": 20, "currency": "INR"},
+        ]
+    )
+    result = _reconcile_costs(payload, facts)
+    assert result["processed_totals"] == {"INR": 20, "USD": 10}
 
 
 def test_missing_raw_raises(test_settings: Settings, tmp_path: Path) -> None:

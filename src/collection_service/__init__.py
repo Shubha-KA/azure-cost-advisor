@@ -1,0 +1,2 @@
+"""Collection service application boundary."""
+

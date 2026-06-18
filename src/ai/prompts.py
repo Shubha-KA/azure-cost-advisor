@@ -16,9 +16,9 @@ Recommendation:
 [Concrete action]
 
 Estimated savings:
-$[amount]/month.
+[currency code] [amount]/month.
 
-Be specific. Use resource names, dollar amounts, and percentages from the context only.
+Be specific. Use resource names, currency codes, amounts, and percentages from the context only.
 Do not invent resources or costs not present in the context.
 If context is insufficient, state what data is missing.
 """
@@ -60,7 +60,12 @@ RECOMMENDATIONS_PROMPT = ChatPromptTemplate.from_messages(
             "2. Cost anomalies to investigate\n"
             "3. Quick wins (delete unattached disks, unused public IPs)\n"
             "4. Rightsizing and autoscaling recommendations\n\n"
-            "Use bullet points with estimated monthly savings per item.",
+            "Use bullet points with estimated monthly savings per item.\n"
+            "Only recommend deleting, resizing, or autoscaling a named resource when "
+            "the context contains an explicit waste finding or live Azure Advisor "
+            "recommendation for that same resource. Never recommend a resource whose "
+            "waste level is NONE. Do not invent savings ranges or convert currencies. "
+            "If an exact savings amount is absent, say 'Savings not quantified'.",
         ),
     ]
 )

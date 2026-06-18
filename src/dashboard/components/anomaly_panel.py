@@ -24,16 +24,23 @@ def render_anomaly_panel(data: DashboardData) -> None:
     with col1:
         st.dataframe(df, use_container_width=True, hide_index=True)
     with col2:
-        if "cost_usd" in df.columns and "expected_cost_usd" in df.columns:
+        if "cost_amount" in df.columns and "expected_cost_amount" in df.columns:
             fig = go.Figure()
             fig.add_trace(
-                go.Bar(name="Actual", x=df["date"], y=df["cost_usd"], marker_color="#dc2626")
+                go.Bar(
+                    name="Actual",
+                    x=df["date"],
+                    y=df["cost_amount"],
+                    text=df["currency"],
+                    marker_color="#dc2626",
+                )
             )
             fig.add_trace(
                 go.Bar(
                     name="Expected",
                     x=df["date"],
-                    y=df["expected_cost_usd"],
+                    y=df["expected_cost_amount"],
+                    text=df["currency"],
                     marker_color="#94a3b8",
                 )
             )

@@ -27,6 +27,7 @@ class ResourceGraphCollector(BaseCollector[Any]):
     mock_filename = "resource_graph_inventory.json"
     schema_model = dict  # type: ignore[assignment]
     output_prefix = "resource_graph"
+    allow_mock_fallback = False
 
     def _load_mock_json(self) -> dict[str, Any]:
         disks_path = self.mock_data_dir / "unattached_disks.json"
@@ -90,9 +91,9 @@ class ResourceGraphCollector(BaseCollector[Any]):
         from azure.mgmt.resourcegraph import ResourceGraphClient
         from azure.mgmt.resourcegraph.models import QueryRequest
 
-        credential = get_azure_credential()
+        credential = self.credential or get_azure_credential()
         client = ResourceGraphClient(credential)
-        sub_id = self.settings.azure_subscription_id
+        sub_id = self.context.subscription_id
         subs = [sub_id]
 
         # 1. Unattached Disks
@@ -113,7 +114,7 @@ class ResourceGraphCollector(BaseCollector[Any]):
         ips_q = """
         Resources 
         | where type =~ 'microsoft.network/publicipaddresses' 
-        | project name, resourceGroup, location, ipAddress=tostring(properties.ipAddress), allocationMethod=tostring(properties.publicIPAllocationMethod), sku=tostring(sku.name), associated=isnotempty(properties.ipConfiguration), associatedResource=tostring(properties.ipConfiguration.id)
+        | project id, name, resourceGroup, location, ipAddress=tostring(properties.ipAddress), allocationMethod=tostring(properties.publicIPAllocationMethod), sku=tostring(sku.name), associated=isnotempty(properties.ipConfiguration), associatedResource=tostring(properties.ipConfiguration.id)
         """
         ips_res = client.resources(QueryRequest(subscriptions=subs, query=ips_q))
         ips_data = []

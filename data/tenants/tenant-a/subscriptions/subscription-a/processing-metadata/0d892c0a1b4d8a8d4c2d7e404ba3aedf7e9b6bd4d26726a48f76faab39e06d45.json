@@ -1,0 +1,25 @@
+{
+  "correlationId": "e171a13c-e4ee-4306-a8b4-e4474548b890",
+  "schemaVersion": 1,
+  "tenantId": "tenant-a",
+  "subscriptionId": "subscription-a",
+  "collectionRunId": "d1f89b88-37bc-42ab-9b4a-052b69212b83",
+  "processingRunId": "9fff3b31-dbce-491a-9d07-4e3e7aed9268",
+  "status": "failed",
+  "startedAt": "2026-06-17T14:35:04.792839Z",
+  "completedAt": "2026-06-17T14:35:06.213545Z",
+  "collectors": [],
+  "counts": {},
+  "recordsCollected": 0,
+  "errors": [
+    "cost: cost: live collection failed: 'object' object has no attribute 'get_token'",
+    "metrics: metrics: live collection failed: Failed to collect VM metrics: 'object' object has no attribute 'get_token'",
+    "resource_graph: resource_graph: live collection failed: 'object' object has no attribute 'get_token'",
+    "advisor: advisor: live collection failed: 'object' object has no attribute 'get_token'",
+    "aks: aks: live collection failed: Failed to collect AKS metrics: 'object' object has no attribute 'get_token'"
+  ],
+  "metadataType": "collectionRun",
+  "startTime": "2026-06-17T14:35:04.792839+00:00",
+  "endTime": "2026-06-17T14:35:06.213545+00:00",
+  "metadataId": "0d892c0a1b4d8a8d4c2d7e404ba3aedf7e9b6bd4d26726a48f76faab39e06d45"
+}

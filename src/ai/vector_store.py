@@ -15,6 +15,8 @@ from langchain_openai import AzureOpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config import Settings, get_settings
+from src.money import format_money, format_money_totals
+from src.storage.factory import create_storage_provider
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ class FinOpsVectorStore:
     ) -> None:
         self.embeddings = embeddings
         self.settings = settings or get_settings()
+        self.storage = create_storage_provider(self.settings)
         self.index_dir = self.settings.embeddings_path / FAISS_INDEX_DIR
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.splitter = RecursiveCharacterTextSplitter(
@@ -96,10 +99,47 @@ class FinOpsVectorStore:
     def _load_documents_from_processed(self) -> list[Document]:
         docs: list[Document] = []
         processed = self.settings.processed_path
+        tenant_id = self.settings.effective_tenant_id
+        subscription_id = self.settings.effective_subscription_id
+        repository_resources = self.storage.resources.list_latest(
+            tenant_id, subscription_id
+        )
+        repository_costs = self.storage.cost_facts.list_latest(
+            tenant_id, subscription_id
+        )
 
         resources_path = processed / "resources_latest.csv"
-        if resources_path.exists():
+        if repository_resources:
+            docs.extend(
+                self._documents_from_resources(
+                    pd.DataFrame(
+                        [
+                            {
+                                **item.attributes,
+                                **item.model_dump(
+                                    mode="json", exclude={"attributes"}
+                                ),
+                                "monthly_cost": item.estimated_monthly_cost,
+                            }
+                            for item in repository_resources
+                        ]
+                    )
+                )
+            )
+        elif resources_path.exists():
             docs.extend(self._documents_from_resources(pd.read_csv(resources_path)))
+
+        cost_facts_path = processed / "cost_facts_latest.csv"
+        if repository_costs:
+            docs.extend(
+                self._documents_from_cost_facts(
+                    pd.DataFrame(
+                        [item.model_dump(mode="json") for item in repository_costs]
+                    )
+                )
+            )
+        elif cost_facts_path.exists():
+            docs.extend(self._documents_from_cost_facts(pd.read_csv(cost_facts_path)))
 
         for name, doc_type in [
             ("waste_findings_latest.json", "waste"),
@@ -126,12 +166,18 @@ class FinOpsVectorStore:
             text = (
                 f"Resource: {row.get('resource_name', 'unknown')}\n"
                 f"Type: {row.get('resource_type', 'unknown')}\n"
-                f"Monthly Cost: ${float(row.get('monthly_cost', 0)):.2f}\n"
+                f"Actual Cost (Collected Period): "
+                f"{format_money(row.get('actual_cost_collected_period', 0), row.get('actual_cost_currency', ''))}\n"
+                f"Estimated Monthly Cost: "
+                f"{format_money(row.get('estimated_monthly_cost', row.get('monthly_cost', 0)), row.get('estimated_cost_currency', ''))}\n"
+                f"Cost Basis: {row.get('cost_basis', 'unknown')}\n"
                 f"CPU Average: {float(row.get('cpu_avg_percent', 0)):.1f}%\n"
                 f"Memory Average: {float(row.get('memory_avg_percent', 0)):.1f}%\n"
                 f"Waste Level: {row.get('waste_level', 'NONE')}\n"
                 f"Recommendation: {row.get('recommendation', '')}\n"
-                f"Estimated Savings: ${float(row.get('estimated_savings', 0)):.2f}/month"
+                f"Estimated Savings: "
+                f"{format_money(row.get('estimated_savings', 0), row.get('savings_currency', ''))}/month\n"
+                f"Source: {row.get('source_system', 'unknown')} at {row.get('source_timestamp', '')}"
             )
             documents.append(
                 Document(
@@ -142,6 +188,40 @@ class FinOpsVectorStore:
                         "resource_type": str(row.get("resource_type", "")),
                         "monthly_cost": float(row.get("monthly_cost", 0)),
                         "estimated_savings": float(row.get("estimated_savings", 0)),
+                        "currency": str(row.get("savings_currency", "")),
+                        "cost_basis": str(row.get("cost_basis", "unknown")),
+                        "source_system": str(row.get("source_system", "")),
+                    },
+                )
+            )
+        return documents
+
+    def _documents_from_cost_facts(self, df: pd.DataFrame) -> list[Document]:
+        documents: list[Document] = []
+        for _, row in df.iterrows():
+            text = (
+                f"Azure Cost Fact\n"
+                f"Date: {row.get('date')}\n"
+                f"Resource Group: {row.get('resource_group', 'Unknown')}\n"
+                f"Service: {row.get('service_name', 'Unknown')}\n"
+                f"Location: {row.get('location', 'Unknown')}\n"
+                f"Cost: {format_money(row.get('cost_amount', row.get('cost_usd', 0)), row.get('currency', 'USD'))}\n"
+                f"Usage Quantity: {float(row.get('usage_quantity', 0)):.4f}\n"
+                f"Currency: {row.get('currency', 'USD')}"
+            )
+            documents.append(
+                Document(
+                    page_content=text,
+                    metadata={
+                        "type": "cost_fact",
+                        "date": str(row.get("date", "")),
+                        "resource_group": str(row.get("resource_group", "")),
+                        "service_name": str(row.get("service_name", "")),
+                        "location": str(row.get("location", "")),
+                        "cost_amount": float(row.get("cost_amount", row.get("cost_usd", 0))),
+                        "currency": str(row.get("currency", "USD")),
+                        "resource_id": str(row.get("resource_id", "")),
+                        "source_system": str(row.get("source_system", "")),
                     },
                 )
             )
@@ -157,10 +237,10 @@ class FinOpsVectorStore:
                     f"Resource: {finding.get('resource_name')} in {finding.get('resource_group')}\n"
                     f"Service: {finding.get('service_name')}\n"
                     f"Category: {finding.get('category_label')}\n"
-                    f"Monthly Cost: ${finding.get('monthly_cost_usd', 0)}\n"
+                    f"Monthly Cost: {format_money(finding.get('monthly_cost', finding.get('monthly_cost_usd', 0)), finding.get('cost_currency', 'USD'))}\n"
                     f"CPU: {finding.get('avg_cpu_percent', 0)}%\n"
                     f"Recommendation: {finding.get('recommendation')}\n"
-                    f"Estimated Savings: ${finding.get('estimated_monthly_savings_usd', 0)}/month"
+                    f"Estimated Savings: {format_money(finding.get('estimated_monthly_savings', finding.get('estimated_monthly_savings_usd', 0)), finding.get('savings_currency', 'USD'))}/month"
                 )
                 documents.append(
                     Document(page_content=text, metadata={"type": "waste", **finding})
@@ -171,8 +251,8 @@ class FinOpsVectorStore:
                 text = (
                     f"Cost Anomaly [{anomaly.get('severity', 'unknown')}]\n"
                     f"Date: {anomaly.get('date')}\n"
-                    f"Cost: ${anomaly.get('cost_usd', 0)}\n"
-                    f"Expected: ${anomaly.get('expected_cost_usd', 0)}\n"
+                    f"Cost: {format_money(anomaly.get('cost_amount', anomaly.get('cost_usd', 0)), anomaly.get('currency', 'USD'))}\n"
+                    f"Expected: {format_money(anomaly.get('expected_cost_amount', anomaly.get('expected_cost_usd', 0)), anomaly.get('currency', 'USD'))}\n"
                     f"Description: {anomaly.get('description')}"
                 )
                 documents.append(
@@ -182,9 +262,9 @@ class FinOpsVectorStore:
         elif doc_type == "summary":
             text = (
                 f"Cost Summary\n"
-                f"Total Spend: ${payload.get('total_cost_usd', 0)}\n"
+                f"Total Spend: {format_money_totals(payload.get('total_cost', {'USD': payload.get('total_cost_usd', 0)}))}\n"
                 f"Period: {payload.get('period_start')} to {payload.get('period_end')}\n"
-                f"Est. Savings: ${payload.get('total_estimated_savings_usd', 0)}\n"
+                f"Est. Savings: {format_money_totals(payload.get('total_estimated_savings', {'USD': payload.get('total_estimated_savings_usd', 0)}))}\n"
                 f"Anomalies: {payload.get('anomaly_count', 0)}\n"
                 f"Top Services: {json.dumps(payload.get('top_services', [])[:5])}"
             )
@@ -205,7 +285,7 @@ class FinOpsVectorStore:
                 f"Impact: {rec.get('impact')}\n"
                 f"Problem: {rec.get('problem')}\n"
                 f"Solution: {rec.get('solution')}\n"
-                f"Monthly Savings: ${rec.get('monthlySavingsUsd', 0)}"
+                f"Monthly Savings: {format_money(rec.get('monthlySavingsUsd', 0), rec.get('currency', 'UNKNOWN'))}"
             )
             documents.append(
                 Document(page_content=text, metadata={"type": "advisor", **rec})
@@ -224,8 +304,8 @@ class FinOpsVectorStore:
                 "disks unattached for more than 7 days."
             ),
             (
-                "Unassociated public IPs cost ~$3.65/month each in most regions. "
-                "Delete or associate with active resources."
+                "Unassociated public IPs can incur recurring charges. Use attributed "
+                "Cost Management data or current retail pricing before estimating savings."
             ),
             (
                 "AKS clusters below 20% node utilization should enable the cluster autoscaler "

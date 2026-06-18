@@ -40,34 +40,40 @@ def plotly_daily_cost_trend(daily_costs: pd.DataFrame) -> go.Figure:
 
     df = daily_costs.copy()
     df["date"] = pd.to_datetime(df["date"])
-    df["rolling_7d"] = df["daily_cost"].rolling(window=7, min_periods=1).mean()
+    amount_col = "cost_amount" if "cost_amount" in df else "daily_cost"
+    if "currency" not in df:
+        df["currency"] = "USD"
+    df["rolling_7d"] = df.groupby("currency")[amount_col].transform(
+        lambda values: values.rolling(window=7, min_periods=1).mean()
+    )
 
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=df["date"],
-            y=df["daily_cost"],
-            name="Daily Cost",
-            mode="lines+markers",
-            line=dict(color=COLORS["primary"], width=2),
-            marker=dict(size=6),
-            fill="tozeroy",
-            fillcolor="rgba(0, 120, 212, 0.08)",
+    for currency, currency_df in df.groupby("currency"):
+        fig.add_trace(
+            go.Scatter(
+                x=currency_df["date"],
+                y=currency_df[amount_col],
+                name=f"Daily Cost ({currency})",
+                mode="lines+markers",
+                customdata=[currency] * len(currency_df),
+                hovertemplate="%{x}<br>%{customdata} %{y:,.2f}<extra></extra>",
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=df["date"],
-            y=df["rolling_7d"],
-            name="7-Day Avg",
-            mode="lines",
-            line=dict(color=COLORS["warning"], width=2, dash="dash"),
+        fig.add_trace(
+            go.Scatter(
+                x=currency_df["date"],
+                y=currency_df["rolling_7d"],
+                name=f"7-Day Avg ({currency})",
+                mode="lines",
+                line=dict(dash="dash"),
+                customdata=[currency] * len(currency_df),
+                hovertemplate="%{x}<br>%{customdata} %{y:,.2f}<extra></extra>",
+            )
         )
-    )
     fig.update_layout(
         title="Daily Azure Spend Trend",
         xaxis_title="Date",
-        yaxis_title="Cost (USD)",
+        yaxis_title="Cost amount (see currency in legend)",
         hovermode="x unified",
         height=380,
         template=PLOTLY_TEMPLATE,
@@ -85,7 +91,13 @@ def plotly_service_breakdown(service_costs: pd.DataFrame) -> go.Figure:
 
     df = service_costs.head(10).copy()
     name_col = "service_name" if "service_name" in df.columns else df.columns[0]
-    cost_col = "cost_usd" if "cost_usd" in df.columns else "monthly_cost"
+    cost_col = (
+        "cost_amount"
+        if "cost_amount" in df.columns
+        else ("cost_usd" if "cost_usd" in df.columns else "monthly_cost")
+    )
+    if "currency" not in df:
+        df["currency"] = "USD"
 
     fig = px.bar(
         df,
@@ -93,15 +105,14 @@ def plotly_service_breakdown(service_costs: pd.DataFrame) -> go.Figure:
         y=name_col,
         orientation="h",
         title="Top Services by Cost",
-        labels={cost_col: "Cost (USD)", name_col: "Service"},
-        color=cost_col,
-        color_continuous_scale=["#cce4f7", "#0078d4"],
+        labels={cost_col: "Cost amount", name_col: "Service"},
+        color="currency",
+        custom_data=["currency"],
     )
     fig.update_layout(
         height=380,
         template=PLOTLY_TEMPLATE,
         showlegend=False,
-        coloraxis_showscale=False,
         margin=dict(l=40, r=20, t=60, b=40),
     )
     return fig
@@ -157,7 +168,7 @@ def plotly_savings_by_resource(resources: pd.DataFrame) -> go.Figure:
         color="waste_level",
         color_discrete_map=WASTE_COLORS,
         title="Top Estimated Savings by Resource",
-        labels={"estimated_savings": "Est. Savings (USD/mo)", "resource_name": "Resource"},
+        labels={"estimated_savings": "Estimated savings", "resource_name": "Resource"},
     )
     fig.update_layout(
         height=320,
@@ -177,23 +188,32 @@ def altair_cost_area(daily_costs: pd.DataFrame) -> alt.Chart:
 
     df = daily_costs.copy()
     df["date"] = pd.to_datetime(df["date"])
+    amount_col = "cost_amount" if "cost_amount" in df else "daily_cost"
+    if "currency" not in df:
+        df["currency"] = "USD"
 
     area = (
         alt.Chart(df)
         .mark_area(opacity=0.4, color=COLORS["primary"])
         .encode(
             x=alt.X("date:T", title="Date"),
-            y=alt.Y("daily_cost:Q", title="Daily Cost (USD)", stack=None),
+            y=alt.Y(f"{amount_col}:Q", title="Daily cost amount", stack=None),
+            color=alt.Color("currency:N", title="Currency"),
             tooltip=[
                 alt.Tooltip("date:T", title="Date"),
-                alt.Tooltip("daily_cost:Q", title="Cost", format="$,.2f"),
+                alt.Tooltip(f"{amount_col}:Q", title="Cost", format=",.2f"),
+                alt.Tooltip("currency:N", title="Currency"),
             ],
         )
     )
     line = (
         alt.Chart(df)
         .mark_line(color=COLORS["secondary"], strokeWidth=2)
-        .encode(x="date:T", y="daily_cost:Q")
+        .encode(
+            x="date:T",
+            y=f"{amount_col}:Q",
+            color=alt.Color("currency:N", title="Currency"),
+        )
     )
     return (area + line).properties(
         title="Cost Trend — Altair View",
@@ -223,7 +243,12 @@ def altair_waste_stacked_bar(resources: pd.DataFrame) -> alt.Chart:
                 ),
                 legend=alt.Legend(title="Waste Level"),
             ),
-            tooltip=["resource_type", "waste_level", "count", alt.Tooltip("savings:Q", format="$,.2f")],
+            tooltip=[
+                "resource_type",
+                "waste_level",
+                "count",
+                alt.Tooltip("savings:Q", format=",.2f"),
+            ],
         )
         .properties(title="Waste Distribution by Resource Type", height=280)
     )

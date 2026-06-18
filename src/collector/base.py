@@ -13,6 +13,9 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from src.config import Settings, get_settings
+from src.domain.context import OperationContext
+from src.storage.factory import create_storage_provider
+from src.storage.provider import StorageProvider
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +57,23 @@ class BaseCollector(ABC, Generic[T]):
     mock_filename: str
     schema_model: type[T]
     output_prefix: str
+    allow_mock_fallback: bool = True
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        context: OperationContext | None = None,
+        storage: StorageProvider | None = None,
+        credential: Any | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self.settings.ensure_data_dirs()
+        self.context = context or OperationContext.create(
+            self.settings.effective_tenant_id,
+            self.settings.effective_subscription_id,
+        )
+        self.storage = storage or create_storage_provider(self.settings)
+        self.credential = credential
         self.mock_data_dir = self.settings.project_root / "tests" / "mock_data"
         self.logger = logging.getLogger(f"{__name__}.{self.collector_name}")
 
@@ -72,15 +88,40 @@ class BaseCollector(ABC, Generic[T]):
 
         is_live = False
         try:
-            if self.settings.azure_credentials_configured:
+            collection_mode = self.settings.collection_mode.strip().lower()
+            if collection_mode not in {"auto", "live", "mock"}:
+                raise CollectorError(
+                    f"Unsupported COLLECTION_MODE={self.settings.collection_mode!r}"
+                )
+            use_live = collection_mode == "live" or (
+                collection_mode == "auto"
+                and (
+                    self.credential is not None
+                    or self.settings.azure_credentials_configured
+                )
+            )
+            if use_live:
+                if (
+                    self.credential is None
+                    and not self.settings.azure_credentials_configured
+                ):
+                    raise CollectorError(
+                        f"{self.collector_name}: live collection requires an Azure credential"
+                    )
                 try:
                     self.logger.info("Fetching LIVE data from Azure API...")
                     raw_payload = self._fetch_live_data()
                     is_live = True
                 except NotImplementedError:
+                    if not self.allow_mock_fallback:
+                        raise
                     self.logger.warning("Live fetch not implemented for %s. Falling back to mock.", self.collector_name)
                     raw_payload = self._load_mock_json()
                 except Exception as exc:
+                    if not self.allow_mock_fallback:
+                        raise CollectorError(
+                            f"{self.collector_name}: live collection failed: {exc}"
+                        ) from exc
                     self.logger.error("Live fetch failed for %s: %s. Falling back to mock.", self.collector_name, exc)
                     raw_payload = self._load_mock_json()
             else:
@@ -171,6 +212,7 @@ class BaseCollector(ABC, Generic[T]):
             "mockSource": None if is_live else self.mock_filename,
             "subscriptionId": self._extract_subscription_id(validated),
         }
+        body["context"] = self.context.document_fields()
         self._apply_ingestion_transforms(body)
         return body
 
@@ -195,6 +237,13 @@ class BaseCollector(ABC, Generic[T]):
                 "output_file": output_path.name,
             }
             meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            self.storage.raw_payloads.save(
+                self.context.tenant_id,
+                self.context.subscription_id,
+                self.context.collection_run_id,
+                self.output_prefix,
+                enriched,
+            )
         except OSError as exc:
             raise CollectorError(
                 f"{self.collector_name}: failed to write output: {exc}"

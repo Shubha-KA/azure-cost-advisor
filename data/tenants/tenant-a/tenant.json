@@ -1,0 +1,10 @@
+{
+  "correlationId": "e171a13c-e4ee-4306-a8b4-e4474548b890",
+  "schemaVersion": 1,
+  "tenantId": "tenant-a",
+  "displayName": "tenant-a",
+  "status": "active",
+  "onboardingStatus": "not_started",
+  "createdAt": "2026-06-17T14:35:04.784308Z",
+  "updatedAt": "2026-06-17T14:35:04.784313Z"
+}

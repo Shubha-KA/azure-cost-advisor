@@ -60,6 +60,8 @@ class WasteDetector:
 
     def _apply_oversized_vm_rule(self, df: pd.DataFrame) -> pd.DataFrame:
         mask = (df["resource_type"] == "Virtual Machine") & (
+            df["telemetry_available"].fillna(False)
+        ) & (
             df["cpu_avg_percent"] < CPU_OVERSIZED_THRESHOLD
         )
         df.loc[mask, "waste_level"] = "HIGH"
@@ -88,6 +90,8 @@ class WasteDetector:
 
     def _apply_aks_waste_rule(self, df: pd.DataFrame) -> pd.DataFrame:
         mask = (df["resource_type"] == "AKS Cluster") & (
+            df["telemetry_available"].fillna(False)
+        ) & (
             df["node_utilization"].fillna(100) < AKS_UNDERUTILIZATION_THRESHOLD
         )
         df.loc[mask, "waste_level"] = "HIGH"
@@ -109,17 +113,33 @@ class WasteDetector:
                     "waste_category": row.get("rule_id", "unknown"),
                     "category_label": row.get("rule_id", "unknown").replace("_", " ").title(),
                     "severity": row["waste_level"].lower(),
-                    "monthly_cost_usd": float(row["monthly_cost"]),
+                    "monthly_cost": float(row["monthly_cost"]),
+                    "cost_currency": row.get("estimated_cost_currency", ""),
+                    "cost_basis": row.get("cost_basis", "unknown"),
                     "avg_cpu_percent": float(row["cpu_avg_percent"]),
                     "avg_memory_percent": float(row["memory_avg_percent"]),
                     "recommendation": row["recommendation"],
-                    "estimated_monthly_savings_usd": float(row["estimated_savings"]),
+                    "estimated_monthly_savings": float(row["estimated_savings"]),
+                    "savings_currency": row.get("savings_currency", ""),
+                    "source_system": row.get("source_system", ""),
+                    "source_timestamp": row.get("source_timestamp", ""),
+                    "collection_run_id": row.get("collection_run_id", ""),
                 }
             )
         return {
             "finding_count": len(findings),
-            "total_estimated_savings_usd": round(
-                sum(f["estimated_monthly_savings_usd"] for f in findings), 2
-            ),
+            "total_estimated_savings": {
+                currency: round(
+                    sum(
+                        f["estimated_monthly_savings"]
+                        for f in findings
+                        if f["savings_currency"] == currency
+                    ),
+                    2,
+                )
+                for currency in sorted(
+                    {f["savings_currency"] for f in findings if f["savings_currency"]}
+                )
+            },
             "findings": findings,
         }

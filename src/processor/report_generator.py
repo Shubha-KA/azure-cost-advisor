@@ -11,8 +11,8 @@ from typing import Any
 import pandas as pd
 
 from src.config import Settings, get_settings
-from src.processor.schemas import CANONICAL_COLUMNS
-from src.processor.savings_estimator import SavingsEstimator
+from src.money import format_money, format_money_totals
+from src.processor.schemas import CANONICAL_COLUMNS, COST_FACT_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,10 @@ class ReportGenerator:
     def generate(
         self,
         resources_df: pd.DataFrame,
+        cost_facts_df: pd.DataFrame,
         anomalies_payload: dict,
         savings_summary: dict,
+        reconciliation: dict[str, Any],
     ) -> dict[str, Path]:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         canonical = resources_df[CANONICAL_COLUMNS].copy()
@@ -38,6 +40,16 @@ class ReportGenerator:
         outputs["resources_csv"] = self._write_csv(canonical, timestamp)
         outputs["resources_json"] = self._write_json(
             canonical, f"resources_{timestamp}.json", "resources_latest.json"
+        )
+        outputs["cost_facts_csv"] = self._write_named_csv(
+            cost_facts_df[COST_FACT_COLUMNS],
+            f"cost_facts_{timestamp}.csv",
+            "cost_facts_latest.csv",
+        )
+        outputs["cost_facts_json"] = self._write_json(
+            cost_facts_df[COST_FACT_COLUMNS],
+            f"cost_facts_{timestamp}.json",
+            "cost_facts_latest.json",
         )
         outputs["waste_findings"] = self._write_json(
             waste_payload,
@@ -49,12 +61,23 @@ class ReportGenerator:
             f"anomalies_{timestamp}.json",
             "anomalies_latest.json",
         )
-        summary = self._build_cost_summary(resources_df, savings_summary, anomalies_payload)
+        summary = self._build_cost_summary(
+            cost_facts_df,
+            savings_summary,
+            anomalies_payload,
+            reconciliation,
+        )
         outputs["summary"] = self._write_json(
             summary, f"summary_{timestamp}.json", "summary_latest.json"
         )
         outputs["processing_report"] = self._write_json(
-            self._build_processing_report(resources_df, savings_summary, anomalies_payload),
+            self._build_processing_report(
+                resources_df,
+                cost_facts_df,
+                savings_summary,
+                anomalies_payload,
+                reconciliation,
+            ),
             f"processing_report_{timestamp}.json",
             "processing_report_latest.json",
         )
@@ -66,8 +89,15 @@ class ReportGenerator:
         return outputs
 
     def _write_csv(self, df: pd.DataFrame, timestamp: str) -> Path:
-        ts_path = self.settings.processed_path / f"resources_{timestamp}.csv"
-        latest_path = self.settings.processed_path / "resources_latest.csv"
+        return self._write_named_csv(
+            df, f"resources_{timestamp}.csv", "resources_latest.csv"
+        )
+
+    def _write_named_csv(
+        self, df: pd.DataFrame, timestamp_name: str, latest_name: str
+    ) -> Path:
+        ts_path = self.settings.processed_path / timestamp_name
+        latest_path = self.settings.processed_path / latest_name
         df.to_csv(ts_path, index=False)
         df.to_csv(latest_path, index=False)
         return latest_path
@@ -94,59 +124,125 @@ class ReportGenerator:
 
     def _build_cost_summary(
         self,
-        df: pd.DataFrame,
+        cost_facts: pd.DataFrame,
         savings_summary: dict,
         anomalies_payload: dict,
+        reconciliation: dict[str, Any],
     ) -> dict:
-        total_cost = round(float(df["monthly_cost"].sum()), 2)
-        by_type = (
-            df.groupby("resource_type")["monthly_cost"]
+        totals_by_currency = (
+            cost_facts.groupby("currency")["cost_amount"].sum().round(2).to_dict()
+            if not cost_facts.empty
+            else {}
+        )
+        dates = pd.to_datetime(cost_facts["date"]) if not cost_facts.empty else pd.Series(dtype="datetime64[ns]")
+        daily = (
+            cost_facts.assign(date=dates)
+            .groupby(["date", "currency"], as_index=False)["cost_amount"]
             .sum()
-            .sort_values(ascending=False)
+            .sort_values("date")
+            if not cost_facts.empty
+            else pd.DataFrame(columns=["date", "currency", "cost_amount"])
+        )
+        by_service = (
+            cost_facts.groupby(["service_name", "currency"])["cost_amount"]
+            .sum()
             .reset_index()
-            .rename(columns={"monthly_cost": "cost_usd"})
         )
         top_services = [
-            {"service_name": row["resource_type"], "cost_usd": round(row["cost_usd"], 2)}
-            for _, row in by_type.head(10).iterrows()
+            {
+                "service_name": row["service_name"],
+                "cost_amount": round(row["cost_amount"], 2),
+                "currency": row["currency"],
+            }
+            for _, row in by_service.head(10).iterrows()
         ]
         by_rg = (
-            df.groupby("resource_group")["monthly_cost"]
+            cost_facts.groupby(["resource_group", "currency"])["cost_amount"]
             .sum()
-            .sort_values(ascending=False)
             .reset_index()
         )
         top_rgs = [
-            {"resource_group": row["resource_group"], "cost_usd": round(row["monthly_cost"], 2)}
+            {
+                "resource_group": row["resource_group"],
+                "cost_amount": round(row["cost_amount"], 2),
+                "currency": row["currency"],
+            }
             for _, row in by_rg.head(10).iterrows()
             if pd.notna(row["resource_group"])
         ]
+        by_location = (
+            cost_facts.groupby(["location", "currency"])["cost_amount"]
+            .sum()
+            .reset_index()
+        )
+        top_locations = [
+            {
+                "location": row["location"],
+                "cost_amount": round(row["cost_amount"], 2),
+                "currency": row["currency"],
+            }
+            for _, row in by_location.head(10).iterrows()
+        ]
+        daily_trend = [
+            {
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "cost_amount": round(float(row["cost_amount"]), 2),
+                "currency": row["currency"],
+            }
+            for _, row in daily.iterrows()
+        ]
+        peak_days = {
+            currency: max(
+                (
+                    item
+                    for item in daily_trend
+                    if item["currency"] == currency
+                ),
+                key=lambda item: item["cost_amount"],
+            )
+            for currency in sorted(totals_by_currency)
+        }
 
         return {
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
-            "total_cost_usd": total_cost,
-            "avg_daily_cost_usd": round(total_cost / 30, 2),
-            "period_start": datetime.now(timezone.utc).strftime("%Y-%m-01"),
-            "period_end": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "unique_services": int(df["resource_type"].nunique()),
-            "unique_resource_groups": int(df["resource_group"].nunique()),
-            "peak_day": {"date": None, "cost_usd": 0},
+            "schema_version": 2,
+            "total_cost": totals_by_currency,
+            "average_daily_cost": {
+                currency: round(amount / max(cost_facts["date"].nunique(), 1), 2)
+                for currency, amount in totals_by_currency.items()
+            },
+            "period_start": dates.min().strftime("%Y-%m-%d") if not dates.empty else None,
+            "period_end": dates.max().strftime("%Y-%m-%d") if not dates.empty else None,
+            "unique_services": int(cost_facts["service_name"].nunique()),
+            "unique_resource_groups": int(cost_facts["resource_group"].nunique()),
+            "peak_days": peak_days,
             "top_services": top_services,
             "top_resource_groups": top_rgs,
-            "top_locations": [],
-            "daily_trend": [],
-            "total_estimated_savings_usd": savings_summary.get(
-                "total_estimated_savings_usd", 0
+            "top_locations": top_locations,
+            "daily_trend": daily_trend,
+            "total_estimated_savings": savings_summary.get(
+                "total_estimated_savings", {}
             ),
             "anomaly_count": anomalies_payload.get("anomaly_count", 0),
             "waste_resource_count": savings_summary.get("waste_resource_count", 0),
+            "cost_fact_count": len(cost_facts),
+            "cost_reconciliation": reconciliation,
+            "source_system": "Azure Cost Management",
+            "source_timestamp": cost_facts["source_timestamp"].max()
+            if not cost_facts.empty
+            else None,
+            "collection_run_id": sorted(
+                cost_facts["collection_run_id"].dropna().unique().tolist()
+            ),
         }
 
     def _build_processing_report(
         self,
         df: pd.DataFrame,
+        cost_facts: pd.DataFrame,
         savings_summary: dict,
         anomalies_payload: dict,
+        reconciliation: dict[str, Any],
     ) -> dict:
         waste_breakdown = (
             df[df["waste_level"] != "NONE"]
@@ -162,6 +258,8 @@ class ReportGenerator:
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "resource_count": len(df),
+            "cost_fact_count": len(cost_facts),
+            "cost_reconciliation": reconciliation,
             "waste_breakdown": waste_breakdown,
             "savings_summary": savings_summary,
             "anomaly_summary": {
@@ -193,9 +291,9 @@ class ReportGenerator:
             "",
             f"| Metric | Value |",
             f"|--------|-------|",
-            f"| Total Monthly Cost | ${summary['total_cost_usd']:,.2f} |",
+            f"| Total Cost (Collected Period) | {format_money_totals(summary['total_cost'])} |",
             f"| Waste Resources | {savings_summary.get('waste_resource_count', 0)} |",
-            f"| Est. Monthly Savings | ${savings_summary.get('total_estimated_savings_usd', 0):,.2f} |",
+            f"| Est. Monthly Savings | {format_money_totals(savings_summary.get('total_estimated_savings', {})) or 'N/A'} |",
             f"| Cost Anomalies | {anomalies_payload.get('anomaly_count', 0)} |",
             "",
             "## Top Waste Findings",
@@ -212,7 +310,7 @@ class ReportGenerator:
                 lines.append(
                     f"| {row['resource_name']} | {row['resource_type']} | "
                     f"{row['waste_level']} | {row['recommendation']} | "
-                    f"${row['estimated_savings']:,.2f} |"
+                    f"{format_money(row['estimated_savings'], row.get('savings_currency'))} |"
                 )
 
         lines.extend(["", "## Anomalies", ""])

@@ -58,7 +58,7 @@ def run_pipeline(skip_ai: bool = False) -> dict:
         "summary": summary,
         "waste_count": proc_report.waste_count,
         "anomaly_count": proc_report.anomaly_count,
-        "total_estimated_savings_usd": proc_report.total_estimated_savings_usd,
+        "total_estimated_savings": proc_report.total_estimated_savings,
         "recommendations_source": (
             recommendations.get("source") if recommendations else "skipped"
         ),

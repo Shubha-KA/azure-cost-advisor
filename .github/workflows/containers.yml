@@ -1,0 +1,82 @@
+name: Containers
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+jobs:
+  build:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: auth-service
+            module: src.microservices.auth_service
+            requirements: requirements/services/auth-service.txt
+          - service: collection-service
+            module: src.microservices.collection_service
+            requirements: requirements/services/collection-service.txt
+          - service: processing-service
+            module: src.microservices.processing_service
+            requirements: requirements/services/processing-service.txt
+          - service: ai-service
+            module: src.microservices.ai_service
+            requirements: requirements/services/ai-service.txt
+          - service: api-gateway
+            module: src.microservices.gateway_service
+            requirements: requirements/services/api-gateway.txt
+          - service: notification-service
+            module: src.microservices.notification_service
+            requirements: requirements/services/notification-service.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/docker-login@v2
+        with:
+          login-server: ${{ vars.ACR_LOGIN_SERVER }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.service
+          push: true
+          build-args: |
+            SERVICE_MODULE=${{ matrix.module }}
+            SERVICE_REQUIREMENTS=${{ matrix.requirements }}
+          tags: ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.event.workflow_run.head_sha }}
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ vars.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.event.workflow_run.head_sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+  frontend:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/docker-login@v2
+        with:
+          login-server: ${{ vars.ACR_LOGIN_SERVER }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ vars.ACR_LOGIN_SERVER }}/frontend:${{ github.event.workflow_run.head_sha }}
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ vars.ACR_LOGIN_SERVER }}/frontend:${{ github.event.workflow_run.head_sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"

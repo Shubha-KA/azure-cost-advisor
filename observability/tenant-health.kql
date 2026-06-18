@@ -1,0 +1,7 @@
+traces
+| where timestamp > ago(24h)
+| where message has_any ("collection_summary", "processing_summary", "tenant_run_failed")
+| extend tenantId=tostring(customDimensions.tenantId),
+    subscriptionId=tostring(customDimensions.subscriptionId)
+| summarize Events=count(), Errors=countif(severityLevel >= 3)
+    by tenantId, subscriptionId, bin(timestamp, 15m)

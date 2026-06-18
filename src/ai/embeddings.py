@@ -38,9 +38,19 @@ def build_embeddings(settings: Settings | None = None) -> AzureOpenAIEmbeddings:
         settings.azure_openai_embedding_deployment,
     )
 
+    kwargs = {}
+    if settings.use_managed_identity and not settings.azure_openai_api_key:
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+
+        kwargs["azure_ad_token_provider"] = get_bearer_token_provider(
+            DefaultAzureCredential(),
+            "https://cognitiveservices.azure.com/.default",
+        )
+    else:
+        kwargs["api_key"] = settings.azure_openai_api_key
     return AzureOpenAIEmbeddings(
         azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-        api_key=settings.azure_openai_api_key,
         api_version=settings.azure_openai_api_version,
         azure_deployment=settings.azure_openai_embedding_deployment,
+        **kwargs,
     )

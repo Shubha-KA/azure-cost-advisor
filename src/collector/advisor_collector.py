@@ -14,6 +14,7 @@ class AdvisorCollector(BaseCollector[AdvisorRecommendationsPayload]):
     mock_filename = "advisor_recommendations.json"
     schema_model = AdvisorRecommendationsPayload
     output_prefix = "advisor"
+    allow_mock_fallback = False
 
     def _count_records(self, validated: AdvisorRecommendationsPayload) -> int:
         return len(validated.recommendations)
@@ -25,8 +26,8 @@ class AdvisorCollector(BaseCollector[AdvisorRecommendationsPayload]):
         from typing import Any
         import re
 
-        credential = get_azure_credential()
-        sub_id = self.settings.azure_subscription_id
+        credential = self.credential or get_azure_credential()
+        sub_id = self.context.subscription_id
         client = AdvisorManagementClient(credential, sub_id)
 
         res = client.recommendations.list()
@@ -37,7 +38,14 @@ class AdvisorCollector(BaseCollector[AdvisorRecommendationsPayload]):
             if cat != "Cost":
                 continue
 
-            rg_match = re.search(r"/resourceGroups/([^/]+)/", r.resource_metadata.get("resourceId", "") if r.resource_metadata else "", re.IGNORECASE)
+            resource_id = (
+                getattr(r.resource_metadata, "resource_id", "") or ""
+                if r.resource_metadata
+                else ""
+            )
+            rg_match = re.search(
+                r"/resourceGroups/([^/]+)/", resource_id, re.IGNORECASE
+            )
             resource_group = rg_match.group(1) if rg_match else "Unknown"
 
             savings = 0.0
@@ -54,26 +62,13 @@ class AdvisorCollector(BaseCollector[AdvisorRecommendationsPayload]):
                 "impactedField": r.impacted_field or "target_resource_id",
                 "problem": r.short_description.problem if r.short_description else "Unknown issue",
                 "solution": r.short_description.solution if r.short_description else "Review recommendation",
-                "resourceId": r.resource_metadata.get("resourceId", "Unknown") if r.resource_metadata else "Unknown",
+                "resourceId": resource_id or "Unknown",
                 "resourceGroup": resource_group,
                 "resourceName": r.impacted_value or "Unknown",
                 "monthlySavingsUsd": savings,
-                "lastUpdated": r.last_updated.isoformat() if hasattr(r, "last_updated") and r.last_updated else datetime.now(timezone.utc).isoformat()
-            })
-
-        if not recs:
-            recs.append({
-                "recommendationId": "none",
-                "category": "Cost",
-                "impact": "Low",
-                "impactedField": "target_resource_id",
-                "problem": "No recommendations",
-                "solution": "Your environment is fully optimized.",
-                "resourceId": "none",
-                "resourceGroup": "none",
-                "resourceName": "none",
-                "monthlySavingsUsd": 0.0,
-                "lastUpdated": datetime.now(timezone.utc).isoformat()
+                "lastUpdated": r.last_updated.isoformat() if hasattr(r, "last_updated") and r.last_updated else datetime.now(timezone.utc).isoformat(),
+                "sourceSystem": "Azure Advisor",
+                "sourceTimestamp": datetime.now(timezone.utc).isoformat(),
             })
 
         return {

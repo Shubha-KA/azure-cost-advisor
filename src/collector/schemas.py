@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 
 class MockMetadata(BaseModel):
@@ -21,12 +21,22 @@ class MockMetadata(BaseModel):
 
 class CostRecord(BaseModel):
     date: str
+    resource_id: str = Field(default="", alias="resourceId")
     resource_group: str = Field(alias="resourceGroup")
     service_name: str = Field(alias="serviceName")
     location: str
-    cost_usd: float = Field(alias="costUSD", ge=0)
+    cost_amount: float = Field(
+        validation_alias=AliasChoices("costAmount", "costUSD"),
+        serialization_alias="costAmount",
+        ge=0,
+    )
     usage_quantity: float = Field(alias="usageQuantity", ge=0)
     currency: str = "USD"
+    source_system: str = Field(default="Azure Cost Management", alias="sourceSystem")
+    source_timestamp: datetime = Field(
+        default_factory=datetime.utcnow, alias="sourceTimestamp"
+    )
+    collection_run_id: str = Field(default="legacy", alias="collectionRunId")
     meter_category: str | None = Field(default=None, alias="meterCategory")
     tags: dict[str, str] = Field(default_factory=dict)
 
@@ -59,6 +69,11 @@ class VmMetricResource(BaseModel):
     vm_size: str = Field(alias="vmSize")
     time_range: dict[str, str] = Field(alias="timeRange")
     metrics: dict[str, MetricValues]
+    source_system: str = Field(default="Azure Monitor", alias="sourceSystem")
+    source_timestamp: datetime = Field(
+        default_factory=datetime.utcnow, alias="sourceTimestamp"
+    )
+    collection_run_id: str = Field(default="legacy", alias="collectionRunId")
 
     model_config = {"populate_by_name": True}
 
@@ -119,6 +134,7 @@ class AksNodePool(BaseModel):
 
 
 class AksClusterMetrics(BaseModel):
+    resource_id: str = Field(default="", alias="resourceId")
     cluster_name: str = Field(alias="clusterName")
     resource_group: str = Field(alias="resourceGroup")
     location: str
@@ -126,6 +142,11 @@ class AksClusterMetrics(BaseModel):
     node_pools: list[AksNodePool] = Field(alias="nodePools")
     metrics: dict[str, float]
     monthly_cost_estimate_usd: float = Field(alias="monthlyCostEstimateUsd", ge=0)
+    source_system: str = Field(default="Azure Monitor", alias="sourceSystem")
+    source_timestamp: datetime = Field(
+        default_factory=datetime.utcnow, alias="sourceTimestamp"
+    )
+    collection_run_id: str = Field(default="legacy", alias="collectionRunId")
 
     model_config = {"populate_by_name": True}
 
@@ -147,6 +168,10 @@ class AdvisorRecommendation(BaseModel):
     resource_name: str = Field(alias="resourceName")
     monthly_savings_usd: float = Field(alias="monthlySavingsUsd", ge=0)
     last_updated: str = Field(alias="lastUpdated")
+    source_system: str = Field(default="Azure Advisor", alias="sourceSystem")
+    source_timestamp: datetime = Field(
+        default_factory=datetime.utcnow, alias="sourceTimestamp"
+    )
 
     model_config = {"populate_by_name": True}
 

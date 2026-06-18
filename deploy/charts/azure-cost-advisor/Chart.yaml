@@ -1,0 +1,7 @@
+apiVersion: v2
+name: azure-cost-advisor
+description: Multi-tenant Azure Cost Advisor workloads for AKS
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.29.0-0"

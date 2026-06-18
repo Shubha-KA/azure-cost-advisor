@@ -1,0 +1,5 @@
+resource_group_name  = "rg-finops-tfstate"
+storage_account_name = "stfinopstfstate"
+container_name       = "tfstate"
+key                  = "test/aks-platform.tfstate"
+use_azuread_auth     = true
