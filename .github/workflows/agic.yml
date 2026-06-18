@@ -22,6 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
       - name: Verify Azure variables
         run: |
           echo "CLIENT_ID_PRESENT=${{ vars.AZURE_CLIENT_ID != '' }}"
