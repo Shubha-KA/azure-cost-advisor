@@ -46,6 +46,11 @@ jobs:
           terraform -chdir=infra/bootstrap fmt -check
           terraform -chdir=infra/dev fmt -check
 
+      - name: Terraform init
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false
+          terraform -chdir=infra/dev init -backend=false
+
       - name: Terraform validate
         run: |
           terraform -chdir=infra/bootstrap validate
