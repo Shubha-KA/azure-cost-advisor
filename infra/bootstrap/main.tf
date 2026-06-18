@@ -132,25 +132,3 @@ resource "azurerm_role_assignment" "state_data" {
   principal_id         = each.value
 }
 
-resource "azurerm_management_lock" "resource_group" {
-  name       = "terraform-state-resource-group-delete-lock"
-  scope      = azurerm_resource_group.state.id
-  lock_level = "CanNotDelete"
-  notes      = "Protects the Terraform remote-state resource group from deletion."
-
-  depends_on = [azurerm_private_endpoint.state_blob]
-}
-
-resource "azurerm_management_lock" "storage_account" {
-  name       = "terraform-state-storage-delete-lock"
-  scope      = azurerm_storage_account.state.id
-  lock_level = "CanNotDelete"
-  notes      = "Protects the Terraform remote-state account from deletion."
-}
-
-resource "azurerm_management_lock" "container" {
-  name       = "terraform-state-container-delete-lock"
-  scope      = azurerm_storage_container.state.id
-  lock_level = "CanNotDelete"
-  notes      = "Protects the Terraform state container from deletion."
-}

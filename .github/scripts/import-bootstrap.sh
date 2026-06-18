@@ -158,51 +158,7 @@ else
     echo "Resource already in state"
 fi
 
-# 10. Management Locks
-echo "Checking Management Lock for Resource Group..."
-if ! terraform state show azurerm_management_lock.resource_group >/dev/null 2>&1; then
-    RG_LOCK_ID=$(az lock list --resource-group "$RG_NAME" $SUB_ARG --query "[?name=='terraform-state-resource-group-delete-lock'].id | [0]" -o tsv 2>/dev/null | tr -d '\r' || true)
-    if [ -n "$RG_LOCK_ID" ]; then
-        echo "Resource Group Lock exists, importing..."
-        terraform import -var-file=environments/platform.tfvars azurerm_management_lock.resource_group "$RG_LOCK_ID"
-        echo "Resource exists and imported"
-    else
-        echo "Resource not found, will be created"
-    fi
-else
-    echo "Resource already in state"
-fi
 
-if [ -n "$SA_ID" ]; then
-    echo "Checking Management Lock for Storage Account..."
-    if ! terraform state show azurerm_management_lock.storage_account >/dev/null 2>&1; then
-        SA_LOCK_ID=$(az lock list --resource "$SA_ID" $SUB_ARG --query "[?name=='terraform-state-storage-delete-lock'].id | [0]" -o tsv 2>/dev/null | tr -d '\r' || true)
-        if [ -n "$SA_LOCK_ID" ]; then
-            echo "Storage Account Lock exists, importing..."
-            terraform import -var-file=environments/platform.tfvars azurerm_management_lock.storage_account "$SA_LOCK_ID"
-            echo "Resource exists and imported"
-        else
-            echo "Resource not found, will be created"
-        fi
-    else
-        echo "Resource already in state"
-    fi
-    
-    echo "Checking Management Lock for Container..."
-    if ! terraform state show azurerm_management_lock.container >/dev/null 2>&1; then
-        CONTAINER_ID="${SA_ID}/blobServices/default/containers/tfstate"
-        CONT_LOCK_ID=$(az lock list --resource "$CONTAINER_ID" $SUB_ARG --query "[?name=='terraform-state-container-delete-lock'].id | [0]" -o tsv 2>/dev/null | tr -d '\r' || true)
-        if [ -n "$CONT_LOCK_ID" ]; then
-            echo "Container Lock exists, importing..."
-            terraform import -var-file=environments/platform.tfvars azurerm_management_lock.container "$CONT_LOCK_ID"
-            echo "Resource exists and imported"
-        else
-            echo "Resource not found, will be created"
-        fi
-    else
-        echo "Resource already in state"
-    fi
-fi
 
 echo "========================================="
 echo "Import process completed successfully."
