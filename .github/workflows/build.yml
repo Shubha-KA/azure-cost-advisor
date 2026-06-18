@@ -1,8 +1,10 @@
+---
 # .github/workflows/build.yml
 on:
   workflow_call:
     inputs: {}
-    secrets: inherit
+    secrets: # yamllint disable-rule: truthy
+      inherit: true
 
 jobs:
   build:
@@ -25,7 +27,15 @@ jobs:
         id: acr
         run: |
           echo "acr=$(terraform -chdir=infra/dev output -raw acr_name)" >> $GITHUB_OUTPUT
-          echo "rg=$(terraform -chdir=infra/dev output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          RG_NAME=$(jq -r .resource_group_name.value bootstrap-outputs.json)
+          SA_NAME=$(jq -r .storage_account_name.value bootstrap-outputs.json)
+          cat <<EOF > infra/dev/backend.dev.hcl
+          resource_group_name  = "$RG_NAME"
+          storage_account_name = "$SA_NAME"
+          container_name       = "tfstate"
+          key                  = "dev/aks-platform.tfstate"
+          use_azuread_auth     = true
+          EOF
 
       - name: ACR login
         run: az acr login -n ${{ steps.acr.outputs.acr }}
@@ -33,50 +43,57 @@ jobs:
       # Build & push each service
       - name: Build & push collection-service
         run: |
-          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG}
+          docker build -f Dockerfile.service -t $IMAGE .
+          docker push $IMAGE
 
       - name: Build & push ai-service
         run: |
-          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG}
+          docker build -f Dockerfile.service -t $IMAGE .
+          docker push $IMAGE
 
       - name: Build & push billing-service
         run: |
-          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG}
+          docker build -f Dockerfile.service -t $IMAGE .
+          docker push $IMAGE
 
       - name: Build & push expense-service
         run: |
-          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG}
+          docker build -f Dockerfile.service -t $IMAGE .
+          docker push $IMAGE
 
       - name: Build & push recommendation-service
         run: |
-          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG}
+          docker build -f Dockerfile.service -t $IMAGE .
+          docker push $IMAGE
 
       - name: Build & push frontend
         run: |
-          docker build -f frontend/Dockerfile -t ${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG}
+          docker build -f frontend/Dockerfile -t $IMAGE .
+          docker push $IMAGE
 
       - name: Build & push API-gateway (if exists)
         run: |
-          docker build -f Dockerfile.api -t ${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG} .
-          docker push ${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG}
+          IMAGE=${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG}
+          docker build -f Dockerfile.api -t $IMAGE .
+          docker push $IMAGE
 
       - name: Write image manifest
         run: |
-          cat > image-manifest.json <<EOF
+          cat > image-manifest.json <<EOF # yamllint disable-line rule:line-length
           {
-            "collection-service": "${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG}",
-            "ai-service": "${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG}",
-            "billing-service": "${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG}",
-            "expense-service": "${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG}",
-            "recommendation-service": "${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG}",
-            "frontend": "${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG}",
-            "api-gateway": "${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG}"
+            "collection-service": "${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG}", # yamllint disable-line rule:line-length
+            "ai-service": "${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG}", # yamllint disable-line rule:line-length
+            "billing-service": "${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG}", # yamllint disable-line rule:line-length
+            "expense-service": "${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG}", # yamllint disable-line rule:line-length
+            "recommendation-service": "${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG}", # yamllint disable-line rule:line-length
+            "frontend": "${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG}", # yamllint disable-line rule:line-length
+            "api-gateway": "${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG}" # yamllint disable-line rule:line-length
           }
           EOF
 
