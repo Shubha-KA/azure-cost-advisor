@@ -251,9 +251,7 @@ jobs:
     name: "📦 Build & Push Docker Images"
     needs: postinfra
     runs-on: ubuntu-latest
-    env:
-      IMAGE_TAG: ${{ env.IMAGE_TAG }}
-    steps:
+  steps:
       - uses: actions/checkout@v4
 
       - name: Azure login (OIDC)
