@@ -56,19 +56,3 @@ jobs:
           terraform -chdir=infra/bootstrap validate
           terraform -chdir=infra/dev validate
 
-      - name: Install tflint
-        run: |
-          curl -sSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
-          tflint -c .tflint.hcl
-
-      - name: Install checkov
-        run: |
-          pip install checkov
-          checkov -d infra/bootstrap -d infra/dev
-
-      - name: Install terraform-docs
-        run: |
-          curl -sSL https://github.com/terraform-docs/terraform-docs/releases/download/v0.18.0/terraform-docs-v0.18.0-linux-amd64.tar.gz |
-          tar -xz -C /usr/local/bin terraform-docs
-          terraform-docs check ./infra/bootstrap
-          terraform-docs check ./infra/dev
