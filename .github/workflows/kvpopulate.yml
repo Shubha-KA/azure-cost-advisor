@@ -1,0 +1,54 @@
+# .github/workflows/kvpopulate.yml
+on:
+  workflow_call:
+    inputs: {}
+    secrets: inherit
+
+jobs:
+  kvpopulate:
+    name: "🔐 Populate Key Vault"
+    runs-on: ubuntu-latest
+    needs: []
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      - name: Get Key Vault name & RG
+        id: kv
+        run: |
+          echo "kv=$(terraform -chdir=infra/dev output -raw key_vault_name)" >> $GITHUB_OUTPUT
+          echo "rg=$(terraform -chdir=infra/dev output -raw resource_group_name)" >> $GITHUB_OUTPUT
+
+      - name: Populate secrets from required-objects.txt
+        env:
+          KV_NAME: ${{ steps.kv.outputs.kv }}
+        run: |
+          REPORT=$(mktemp)
+          echo "# Key Vault Population Report" > $REPORT
+          echo "" >> $REPORT
+          while IFS= read -r secret; do
+            [[ -z "$secret" || "$secret" =~ ^# ]] && continue
+            VALUE="${!secret}"
+            if [ -z "$VALUE" ]; then
+              VALUE="PLACEHOLDER_$(date +%s)"
+              echo "⚠️ $secret – placeholder (needs real value)" >> $REPORT
+            else
+              echo "✅ $secret – real value supplied" >> $REPORT
+            fi
+            az keyvault secret set --vault-name $KV_NAME --name "$secret" --value "$VALUE"
+          done < deploy/keyvault/required-objects.txt
+          cat $REPORT
+          echo "report=$REPORT" >> $GITHUB_OUTPUT
+
+      - name: Upload KV population report
+        uses: actions/upload-artifact@v4
+        with:
+          name: kv-report
+          path: ${{ steps.kvpopulate.outputs.report }}

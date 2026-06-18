@@ -1,0 +1,47 @@
+# .github/workflows/platform.yml
+on:
+  workflow_call:
+    inputs: {}
+    secrets: inherit
+
+jobs:
+  platform:
+    name: "🏗️ Deploy Platform (infra/dev)"
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      - name: Download backend config
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-config
+          path: .
+
+      - name: Terraform init (remote backend)
+        run: |
+          terraform -chdir=infra/dev init -reconfigure -backend-config=backend.dev.hcl
+
+      - name: Terraform plan (platform)
+        run: |
+          terraform -chdir=infra/dev plan \
+            -var-file=environments/dev.tfvars \
+            -out=dev.tfplan
+
+      - name: Terraform apply (platform)
+        run: terraform -chdir=infra/dev apply -auto-approve dev.tfplan
+
+      - name: Upload infra/dev folder (for downstream jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-dev
+          path: infra/dev

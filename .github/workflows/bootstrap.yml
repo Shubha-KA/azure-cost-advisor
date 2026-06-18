@@ -1,0 +1,65 @@
+# .github/workflows/bootstrap.yml
+on:
+  workflow_call:
+    inputs: {}
+    secrets: inherit
+
+jobs:
+  bootstrap:
+    name: "🔧 Bootstrap Remote‑State"
+    needs: validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      # Initialise without a backend, plan & apply
+      - name: Terraform init (no backend)
+        run: terraform -chdir=infra/bootstrap init -backend=false
+
+      - name: Terraform plan
+        run: |
+          terraform -chdir=infra/bootstrap plan \
+            -var-file=environments/platform.tfvars \
+            -out=bootstrap.tfplan
+
+      - name: Terraform apply
+        run: terraform -chdir=infra/bootstrap apply -auto-approve bootstrap.tfplan
+
+      # Export all outputs for later stages
+      - name: Export bootstrap outputs as JSON
+        id: export
+        run: |
+          terraform -chdir=infra/bootstrap output -json > bootstrap-outputs.json
+          cat bootstrap-outputs.json
+
+      - name: Upload bootstrap outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-outputs
+          path: bootstrap-outputs.json
+
+      # Generate backend.dev.hcl from the outputs
+      - name: Generate backend.dev.hcl
+        run: |
+          cat <<EOF > infra/dev/backend.dev.hcl
+          resource_group_name  = "$(jq -r .resource_group_name.value bootstrap-outputs.json)"
+          storage_account_name = "$(jq -r .storage_account_name.value bootstrap-outputs.json)"
+          container_name       = "tfstate"
+          key                  = "dev/aks-platform.tfstate"
+          use_azuread_auth     = true
+          EOF
+
+      - name: Upload backend configuration
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-config
+          path: infra/dev/backend.dev.hcl

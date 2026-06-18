@@ -1,0 +1,62 @@
+# .github/workflows/postinfra.yml
+on:
+  workflow_call:
+    inputs: {}
+    secrets: inherit
+
+jobs:
+  postinfra:
+    name: "✅ Post‑Infra Validation"
+    needs: platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      - name: Download infra/dev artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: infra-dev
+          path: .
+
+      - name: Set output variables
+        id: tfout
+        run: |
+          echo "RG=$(terraform -chdir=infra/dev output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "AKS=$(terraform -chdir=infra/dev output -raw aks_cluster_name)" >> $GITHUB_OUTPUT
+          echo "ACR=$(terraform -chdir=infra/dev output -raw acr_name)" >> $GITHUB_OUTPUT
+          echo "KV=$(terraform -chdir=infra/dev output -raw key_vault_name)" >> $GITHUB_OUTPUT
+          echo "COSMOS=$(terraform -chdir=infra/dev output -raw cosmosdb_account_name)" >> $GITHUB_OUTPUT
+          echo "SB=$(terraform -chdir=infra/dev output -raw servicebus_namespace)" >> $GITHUB_OUTPUT
+          echo "SEARCH=$(terraform -chdir=infra/dev output -raw search_service_name)" >> $GITHUB_OUTPUT
+          echo "OPENAI=$(terraform -chdir=infra/dev output -raw openai_account_name)" >> $GITHUB_OUTPUT
+
+      - name: AKS – get credentials & nodes ready
+        run: |
+          az aks get-credentials --resource-group ${{ steps.tfout.outputs.RG }} --name ${{ steps.tfout.outputs.AKS }} --overwrite-existing
+          kubectl get nodes
+
+      - name: ACR – probe
+        run: az acr show -n ${{ steps.tfout.outputs.ACR }} -g ${{ steps.tfout.outputs.RG }} --query "provisioningState"
+
+      - name: Key Vault – probe
+        run: az keyvault show -n ${{ steps.tfout.outputs.KV }} -g ${{ steps.tfout.outputs.RG }} --query "properties.provisioningState"
+
+      - name: Cosmos DB – probe
+        run: az cosmosdb show -n ${{ steps.tfout.outputs.COSMOS }} -g ${{ steps.tfout.outputs.RG }} --query "properties.provisioningState"
+
+      - name: Service Bus – probe
+        run: az servicebus namespace show -n ${{ steps.tfout.outputs.SB }} -g ${{ steps.tfout.outputs.RG }} --query "sku.name"
+
+      - name: Azure AI Search – probe
+        run: az search service show -n ${{ steps.tfout.outputs.SEARCH }} -g ${{ steps.tfout.outputs.RG }} --query "hostingMode"
+
+      - name: Azure OpenAI – probe
+        run: az cognitiveservices account show -n ${{ steps.tfout.outputs.OPENAI }} -g ${{ steps.tfout.outputs.RG }} --query "properties.provisioningState"

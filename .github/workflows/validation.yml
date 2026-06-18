@@ -1,0 +1,48 @@
+# .github/workflows/validation.yml
+on:
+  workflow_call:
+    inputs: {}
+    secrets: inherit
+
+jobs:
+  validation:
+    name: "🛡️ Terraform Validation"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      - name: Terraform fmt (check)
+        run: |
+          terraform -chdir=infra/bootstrap fmt -check
+          terraform -chdir=infra/dev fmt -check
+
+      - name: Terraform validate
+        run: |
+          terraform -chdir=infra/bootstrap validate
+          terraform -chdir=infra/dev validate
+
+      - name: Install tflint
+        run: |
+          curl -sSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+          tflint -c .tflint.hcl
+
+      - name: Install checkov
+        run: |
+          pip install checkov
+          checkov -d infra/bootstrap -d infra/dev
+
+      - name: Install terraform-docs
+        run: |
+          curl -sSL https://github.com/terraform-docs/terraform-docs/releases/download/v0.18.0/terraform-docs-v0.18.0-linux-amd64.tar.gz |
+          tar -xz -C /usr/local/bin terraform-docs
+          terraform-docs check ./infra/bootstrap
+          terraform-docs check ./infra/dev

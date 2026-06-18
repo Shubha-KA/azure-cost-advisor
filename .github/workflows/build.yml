@@ -1,0 +1,87 @@
+# .github/workflows/build.yml
+on:
+  workflow_call:
+    inputs: {}
+    secrets: inherit
+
+jobs:
+  build:
+    name: "📦 Build & Push Docker Images"
+    needs: postinfra
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-oidc: true
+
+      - name: Retrieve ACR name
+        id: acr
+        run: |
+          echo "acr=$(terraform -chdir=infra/dev output -raw acr_name)" >> $GITHUB_OUTPUT
+          echo "rg=$(terraform -chdir=infra/dev output -raw resource_group_name)" >> $GITHUB_OUTPUT
+
+      - name: ACR login
+        run: az acr login -n ${{ steps.acr.outputs.acr }}
+
+      # Build & push each service
+      - name: Build & push collection-service
+        run: |
+          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG}
+
+      - name: Build & push ai-service
+        run: |
+          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG}
+
+      - name: Build & push billing-service
+        run: |
+          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG}
+
+      - name: Build & push expense-service
+        run: |
+          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG}
+
+      - name: Build & push recommendation-service
+        run: |
+          docker build -f Dockerfile.service -t ${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG}
+
+      - name: Build & push frontend
+        run: |
+          docker build -f frontend/Dockerfile -t ${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG}
+
+      - name: Build & push API-gateway (if exists)
+        run: |
+          docker build -f Dockerfile.api -t ${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG} .
+          docker push ${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG}
+
+      - name: Write image manifest
+        run: |
+          cat > image-manifest.json <<EOF
+          {
+            "collection-service": "${{ steps.acr.outputs.acr }}/collection-service:${IMAGE_TAG}",
+            "ai-service": "${{ steps.acr.outputs.acr }}/ai-service:${IMAGE_TAG}",
+            "billing-service": "${{ steps.acr.outputs.acr }}/billing-service:${IMAGE_TAG}",
+            "expense-service": "${{ steps.acr.outputs.acr }}/expense-service:${IMAGE_TAG}",
+            "recommendation-service": "${{ steps.acr.outputs.acr }}/recommendation-service:${IMAGE_TAG}",
+            "frontend": "${{ steps.acr.outputs.acr }}/frontend:${IMAGE_TAG}",
+            "api-gateway": "${{ steps.acr.outputs.acr }}/api-gateway:${IMAGE_TAG}"
+          }
+          EOF
+
+      - name: Upload image manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-manifest
+          path: image-manifest.json
