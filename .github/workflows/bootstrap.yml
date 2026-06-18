@@ -44,6 +44,11 @@ jobs:
       - name: Initialise without a backend
         run: terraform -chdir=infra/bootstrap init -backend=false
 
+      - name: Terraform Import Existing Resources
+        run: |
+          chmod +x .github/scripts/import-bootstrap.sh
+          bash .github/scripts/import-bootstrap.sh
+
       - name: Terraform plan
         run: |
           terraform -chdir=infra/bootstrap plan \
