@@ -42,10 +42,18 @@ class SavingsEstimator:
             result.loc[unmapped, "monthly_cost"] * 0.25
         ).round(2)
 
-        total = float(result["estimated_savings"].sum())
+        totals = (
+            result[result["savings_currency"].fillna("") != ""]
+            .groupby("savings_currency")["estimated_savings"]
+            .sum()
+            .round(2)
+            .to_dict()
+            if "savings_currency" in result
+            else {}
+        )
         logger.info(
-            "Savings estimation complete: $%.2f total estimated monthly savings",
-            total,
+            "Savings estimation complete: %s total estimated monthly savings",
+            totals,
         )
         return result
 

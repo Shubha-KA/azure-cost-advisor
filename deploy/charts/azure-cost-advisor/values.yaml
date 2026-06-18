@@ -184,6 +184,7 @@ services:
       EVENT_PROVIDER: event-provider
       SERVICE_BUS_NAMESPACE: service-bus-namespace
       SERVICE_BUS_TOPIC: service-bus-topic
+      COLLECTION_ENTRA_CLIENT_ID: collection-entra-client-id
       SEARCH_PROVIDER: search-provider
       AZURE_SEARCH_ENDPOINT: azure-search-endpoint
       AZURE_SEARCH_INDEX_NAME: azure-search-index-name

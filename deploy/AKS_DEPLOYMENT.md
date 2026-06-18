@@ -24,7 +24,7 @@ private endpoint. Peer its VNet to the state VNet and link or forward the
 
 ## 3. Initialize The Platform Backend
 
-Create `infra/aks/backend.dev.hcl` from bootstrap outputs:
+Create `infra/dev/backend.dev.hcl` from bootstrap outputs:
 
 ```hcl
 resource_group_name  = "<bootstrap output>"
@@ -37,16 +37,19 @@ use_azuread_auth     = true
 Then initialize and plan:
 
 ```powershell
-terraform -chdir=infra/aks init -reconfigure -backend-config=backend.dev.hcl
-terraform -chdir=infra/aks plan -var-file=environments/dev.tfvars -out=dev.tfplan
-terraform -chdir=infra/aks apply dev.tfplan
+terraform -chdir=infra/dev init -reconfigure -backend-config=backend.dev.hcl
+terraform -chdir=infra/dev plan -var-file=environments/dev.tfvars -out=dev.tfplan
+terraform -chdir=infra/dev apply dev.tfplan
 ```
 
-## 4. Populate Key Vault
+## 4. Validate Key Vault
 
-Populate every object named in `deploy/keyvault/required-objects.txt` through a
-secure operator session. Do not place values in Terraform variables, Helm
-values, Kubernetes resources, or GitHub settings.
+The platform Terraform apply creates every object named in
+`deploy/keyvault/required-objects.txt`. No secret-valued Terraform input
+variables are used. Terraform-generated values include the Entra login
+application secret and API session signing secret; these values are written
+directly to Key Vault but remain sensitive data in the protected remote
+Terraform state. Restrict state access to deployment identities only.
 
 Validate names without retrieving values:
 
@@ -54,9 +57,11 @@ Validate names without retrieving values:
 .\deploy\scripts\Test-KeyVaultObjects.ps1 -VaultName <terraform-output>
 ```
 
-The collection Entra application must also contain a federated identity
-credential for the AKS issuer and
-`system:serviceaccount:finops-collection:collection-service`.
+Terraform creates federated credentials on the collection Entra application
+for both:
+
+- `system:serviceaccount:finops-collection:collection-service`
+- `system:serviceaccount:finops-ai:ai-service`
 
 ## 5. Build And Push Images
 

@@ -8,7 +8,6 @@ from typing import Any
 from azure.mgmt.resourcegraph import ResourceGraphClient
 from azure.mgmt.resourcegraph.models import QueryRequest
 
-from src.collector.auth import get_azure_credential
 from src.config import Settings
 
 
@@ -74,9 +73,19 @@ class ResourceGraphInventoryService:
         self.subscription_ids = subscription_ids or [
             settings.effective_subscription_id
         ]
-        self.client = client or ResourceGraphClient(
-            credential or get_azure_credential()
-        )
+        if client is not None:
+            self.client = client
+        else:
+            if credential is None:
+                if settings.entra_auth_enabled:
+                    raise InventoryQueryError(
+                        "A tenant-scoped credential is required for live inventory "
+                        "queries in Entra authentication mode"
+                    )
+                from src.collector.auth import get_azure_credential
+
+                credential = get_azure_credential()
+            self.client = ResourceGraphClient(credential)
 
     def query(self, question: str) -> dict[str, Any]:
         intent = inventory_intent(question)

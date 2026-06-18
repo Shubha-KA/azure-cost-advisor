@@ -15,5 +15,5 @@ terraform -chdir=infra/bootstrap apply bootstrap.tfplan
 terraform -chdir=infra/bootstrap output -json backend_configuration
 ```
 
-Create `infra/aks/backend.dev.hcl` from the output. This file is
+Create `infra/dev/backend.dev.hcl` from the output. This file is
 deployment-local and must not contain credentials.

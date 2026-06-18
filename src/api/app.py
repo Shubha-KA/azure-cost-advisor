@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 
 from src.ai.advisor import FinOpsAdvisor
 from src.ai.inventory import ResourceGraphInventoryService
+from src.auth.customer_credentials import CustomerTenantCredentialFactory
 from src.auth.entra import EntraAuthService
 from src.config import Settings, get_settings
 from src.dashboard.data_loader import DashboardDataLoader
@@ -138,6 +139,10 @@ def create_app(
     app.state.inventory_factory = inventory_factory
     app.state.advisor_factory = advisor_factory
     app.state.auth_factory = auth_factory
+    app.state.credential_factory = CustomerTenantCredentialFactory(
+        settings,
+        storage,
+    )
     app.state.auth_flows = {}
     app.add_middleware(ObservabilityMiddleware)
     app.add_middleware(
@@ -373,11 +378,18 @@ def create_app(
         question = str(body.get("message", "")).strip()
         if not question:
             raise HTTPException(422, "message is required")
-        advisor = request.app.state.advisor_factory(
-            settings,
-            tenant_id=tenant_id,
-            subscription_ids=[subscription_id],
-        )
+        advisor_kwargs = {
+            "tenant_id": tenant_id,
+            "subscription_ids": [subscription_id],
+        }
+        if request.app.state.advisor_factory is FinOpsAdvisor:
+            advisor_kwargs["credential"] = (
+                request.app.state.credential_factory.for_subscription(
+                    tenant_id,
+                    subscription_id,
+                )
+            )
+        advisor = request.app.state.advisor_factory(settings, **advisor_kwargs)
         return {
             "answer": advisor.ask(question, str(body.get("history", ""))),
             "tenantId": tenant_id,
@@ -387,10 +399,20 @@ def create_app(
 
     def inventory(request: Request, kind: str):
         _, tenant_id, subscription_id = _scopes(request)
+        inventory_kwargs = {
+            "tenant_id": tenant_id,
+            "subscription_ids": [subscription_id],
+        }
+        if request.app.state.inventory_factory is ResourceGraphInventoryService:
+            inventory_kwargs["credential"] = (
+                request.app.state.credential_factory.for_subscription(
+                    tenant_id,
+                    subscription_id,
+                )
+            )
         return request.app.state.inventory_factory(
             settings,
-            tenant_id=tenant_id,
-            subscription_ids=[subscription_id],
+            **inventory_kwargs,
         ).query(INVENTORY_QUESTIONS[kind])
 
     def inventory_endpoint(kind: str) -> Callable:

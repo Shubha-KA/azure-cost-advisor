@@ -297,6 +297,16 @@ class DataNormalizer:
                     "node_utilization": None,
                     "anomaly": False,
                     "rule_id": None,
+                    "cost_estimate_method": (
+                        "resource_group_service_cost_allocation"
+                        if allocated_cost
+                        else None
+                    ),
+                    "cost_estimate_source": (
+                        "Azure Cost Management"
+                        if allocated_cost
+                        else None
+                    ),
                 }
             )
         return pd.DataFrame(rows)
@@ -355,6 +365,11 @@ class DataNormalizer:
                     "node_utilization": None,
                     "anomaly": False,
                     "rule_id": None,
+                    "cost_estimate_method": disk.get(
+                        "costEstimateMethod",
+                        "legacy_disk_monthly_cost_estimate_usd",
+                    ),
+                    "cost_estimate_source": "synthetic_resource_graph_estimate",
                 }
             )
         return pd.DataFrame(rows)
@@ -394,6 +409,11 @@ class DataNormalizer:
                     "node_utilization": None,
                     "anomaly": False,
                     "rule_id": None,
+                    "cost_estimate_method": ip.get(
+                        "costEstimateMethod",
+                        "legacy_public_ip_monthly_cost_estimate_usd",
+                    ),
+                    "cost_estimate_source": "synthetic_resource_graph_estimate",
                 }
             )
         return pd.DataFrame(rows)
@@ -439,6 +459,16 @@ class DataNormalizer:
                     "node_utilization": util,
                     "anomaly": False,
                     "rule_id": None,
+                    "cost_estimate_method": (
+                        "collector_monthly_cost_estimate_usd"
+                        if monthly_estimate
+                        else None
+                    ),
+                    "cost_estimate_source": (
+                        "synthetic_collector_estimate"
+                        if monthly_estimate
+                        else None
+                    ),
                 }
             )
         return pd.DataFrame(rows)
@@ -529,6 +559,12 @@ class DataNormalizer:
             result.at[index, "cost_basis"] = (
                 "actual" if observed_days >= 28 else "extrapolated"
             )
+            result.at[index, "cost_estimate_method"] = (
+                "cost_management_actual_period"
+                if observed_days >= 28
+                else f"cost_management_{observed_days}_day_x_30"
+            )
+            result.at[index, "cost_estimate_source"] = "Azure Cost Management"
             result.at[index, "cost_period_start"] = start.strftime("%Y-%m-%d")
             result.at[index, "cost_period_end"] = end.strftime("%Y-%m-%d")
             result.at[index, "savings_currency"] = currency

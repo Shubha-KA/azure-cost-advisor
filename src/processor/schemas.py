@@ -39,6 +39,8 @@ ENRICHED_COLUMNS = CANONICAL_COLUMNS + [
     "node_utilization",
     "anomaly",
     "rule_id",
+    "cost_estimate_method",
+    "cost_estimate_source",
 ]
 
 COST_FACT_COLUMNS = [

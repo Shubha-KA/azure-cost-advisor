@@ -51,6 +51,35 @@ resource "azuread_service_principal" "collection" {
   app_role_assignment_required = false
 }
 
+resource "random_uuid" "internal_api_access" {}
+
+resource "azuread_application" "internal_api" {
+  display_name     = "azure-cost-advisor-${var.environment}-internal-api"
+  sign_in_audience = "AzureADMyOrg"
+  owners           = [data.azuread_client_config.current.object_id]
+  identifier_uris  = ["api://azure-cost-advisor-services"]
+
+  app_role {
+    allowed_member_types = ["Application"]
+    description          = "Allows the API gateway to call internal platform services."
+    display_name         = "Access internal services"
+    enabled              = true
+    id                   = random_uuid.internal_api_access.result
+    value                = "InternalService.Access"
+  }
+}
+
+resource "azuread_service_principal" "internal_api" {
+  client_id                    = azuread_application.internal_api.client_id
+  app_role_assignment_required = true
+}
+
+resource "azuread_app_role_assignment" "gateway_internal_api" {
+  app_role_id         = random_uuid.internal_api_access.result
+  principal_object_id = module.identities.principal_ids["api-gateway"]
+  resource_object_id  = azuread_service_principal.internal_api.object_id
+}
+
 resource "azuread_application_federated_identity_credential" "collection_aks" {
   application_id = azuread_application.collection.id
   display_name   = "aks-${var.environment}-collection-service"
@@ -58,6 +87,15 @@ resource "azuread_application_federated_identity_credential" "collection_aks" {
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = module.aks.oidc_issuer_url
   subject        = "system:serviceaccount:finops-collection:collection-service"
+}
+
+resource "azuread_application_federated_identity_credential" "ai_inventory_aks" {
+  application_id = azuread_application.collection.id
+  display_name   = "aks-${var.environment}-ai-service-inventory"
+  description    = "AKS workload identity for tenant-scoped live inventory queries."
+  audiences      = ["api://AzureADTokenExchange"]
+  issuer         = module.aks.oidc_issuer_url
+  subject        = "system:serviceaccount:finops-ai:ai-service"
 }
 
 resource "azurerm_role_assignment" "terraform_key_vault_secrets_officer" {

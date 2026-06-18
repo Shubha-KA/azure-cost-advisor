@@ -1,4 +1,4 @@
-"""Azure Resource Graph collector for disks and public IPs (mock-simulated)."""
+"""Azure Resource Graph inventory collector with labeled cost estimates."""
 
 from __future__ import annotations
 
@@ -106,8 +106,11 @@ class ResourceGraphCollector(BaseCollector[Any]):
         disks_res = client.resources(QueryRequest(subscriptions=subs, query=disks_q))
         disks_data = []
         for d in disks_res.data:
-            d["daysUnattached"] = 30  # Simulate since ARG doesn't expose it directly
+            d["daysUnattached"] = 30
             d["monthlyCostEstimateUsd"] = float(d.get("diskSizeGb", 0)) * 0.15
+            d["costBasis"] = "synthetic"
+            d["costEstimateCurrency"] = "USD"
+            d["costEstimateMethod"] = "disk_size_gb_x_0.15_usd"
             disks_data.append(d)
 
         # 2. Public IPs
@@ -120,6 +123,13 @@ class ResourceGraphCollector(BaseCollector[Any]):
         ips_data = []
         for ip in ips_res.data:
             ip["monthlyCostEstimateUsd"] = 3.65 if not ip["associated"] else 0.0
+            ip["costBasis"] = "synthetic" if not ip["associated"] else "unknown"
+            ip["costEstimateCurrency"] = "USD" if not ip["associated"] else ""
+            ip["costEstimateMethod"] = (
+                "flat_3.65_usd_unassociated_public_ip"
+                if not ip["associated"]
+                else ""
+            )
             ips_data.append(ip)
 
         # 3. Inventory
@@ -173,5 +183,7 @@ class ResourceGraphCollector(BaseCollector[Any]):
                     ),
                     2,
                 ),
+                "costBasis": "synthetic",
+                "costEstimateCurrency": "USD",
             },
         }

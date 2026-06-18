@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.ai.inventory import ResourceGraphInventoryService
+from src.ai.inventory import InventoryQueryError
 from src.ai.advisor import FinOpsAdvisor
 from src.ai.rag import RAGPipeline
 from src.ai.router import route_query
@@ -313,6 +314,16 @@ def test_live_inventory_response_has_required_provenance(test_settings):
     assert result["result_count"] == 1
     assert route_query("Show storage accounts") == "live_inventory"
     assert route_query("Show last month's cost trend") == "historical"
+
+
+def test_entra_inventory_requires_tenant_scoped_credential(test_settings):
+    test_settings.auth_mode = "entra"
+    with pytest.raises(InventoryQueryError, match="tenant-scoped credential"):
+        ResourceGraphInventoryService(
+            test_settings,
+            tenant_id="tenant-a",
+            subscription_ids=["subscription-a"],
+        )
 
 
 def test_inventory_chat_never_uses_historical_search(

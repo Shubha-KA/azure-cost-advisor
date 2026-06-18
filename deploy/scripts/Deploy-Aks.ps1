@@ -11,9 +11,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$terraformRoot = Join-Path $root "infra\aks"
-$chart = Join-Path $root "deploy\helm\azure-cost-advisor"
+$terraformRoot = Join-Path $root "infra\dev"
+$chart = Join-Path $root "deploy\charts\azure-cost-advisor"
 $values = Join-Path $chart "values-$Environment.yaml"
+
+if (-not (Test-Path (Join-Path $terraformRoot "main.tf"))) {
+    throw "Terraform root not found: $terraformRoot"
+}
+if (-not (Test-Path (Join-Path $chart "Chart.yaml"))) {
+    throw "Helm chart not found: $chart"
+}
+if (-not (Test-Path $values)) {
+    throw "Helm values file not found: $values"
+}
 
 $outputs = terraform -chdir=$terraformRoot output -json | ConvertFrom-Json
 $resourceGroup = $outputs.resource_group_name.value
