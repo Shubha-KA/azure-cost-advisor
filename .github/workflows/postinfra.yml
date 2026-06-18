@@ -1,13 +1,17 @@
 # .github/workflows/postinfra.yml
+---
+name: "Post-Infrastructure Validation"
+
 on:
   workflow_call:
-    inputs: {}
-    secrets: inherit
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   postinfra:
-    name: "✅ Post‑Infra Validation"
-    needs: platform
+    name: "Post-Infra Validation"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +22,6 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          enable-oidc: true
 
       - name: Download infra/dev artefact
         uses: actions/download-artifact@v4
@@ -40,23 +43,50 @@ jobs:
 
       - name: AKS – get credentials & nodes ready
         run: |
-          az aks get-credentials --resource-group ${{ steps.tfout.outputs.RG }} --name ${{ steps.tfout.outputs.AKS }} --overwrite-existing
+          az aks get-credentials \
+            --resource-group ${{ steps.tfout.outputs.RG }} \
+            --name ${{ steps.tfout.outputs.AKS }} \
+            --overwrite-existing
           kubectl get nodes
 
       - name: ACR – probe
-        run: az acr show -n ${{ steps.tfout.outputs.ACR }} -g ${{ steps.tfout.outputs.RG }} --query "provisioningState"
+        run: >
+          az acr show
+          -n ${{ steps.tfout.outputs.ACR }}
+          -g ${{ steps.tfout.outputs.RG }}
+          --query "provisioningState"
 
       - name: Key Vault – probe
-        run: az keyvault show -n ${{ steps.tfout.outputs.KV }} -g ${{ steps.tfout.outputs.RG }} --query "properties.provisioningState"
+        run: >
+          az keyvault show
+          -n ${{ steps.tfout.outputs.KV }}
+          -g ${{ steps.tfout.outputs.RG }}
+          --query "properties.provisioningState"
 
       - name: Cosmos DB – probe
-        run: az cosmosdb show -n ${{ steps.tfout.outputs.COSMOS }} -g ${{ steps.tfout.outputs.RG }} --query "properties.provisioningState"
+        run: >
+          az cosmosdb show
+          -n ${{ steps.tfout.outputs.COSMOS }}
+          -g ${{ steps.tfout.outputs.RG }}
+          --query "properties.provisioningState"
 
       - name: Service Bus – probe
-        run: az servicebus namespace show -n ${{ steps.tfout.outputs.SB }} -g ${{ steps.tfout.outputs.RG }} --query "sku.name"
+        run: >
+          az servicebus namespace show
+          -n ${{ steps.tfout.outputs.SB }}
+          -g ${{ steps.tfout.outputs.RG }}
+          --query "sku.name"
 
       - name: Azure AI Search – probe
-        run: az search service show -n ${{ steps.tfout.outputs.SEARCH }} -g ${{ steps.tfout.outputs.RG }} --query "hostingMode"
+        run: >
+          az search service show
+          -n ${{ steps.tfout.outputs.SEARCH }}
+          -g ${{ steps.tfout.outputs.RG }}
+          --query "hostingMode"
 
       - name: Azure OpenAI – probe
-        run: az cognitiveservices account show -n ${{ steps.tfout.outputs.OPENAI }} -g ${{ steps.tfout.outputs.RG }} --query "properties.provisioningState"
+        run: >
+          az cognitiveservices account show
+          -n ${{ steps.tfout.outputs.OPENAI }}
+          -g ${{ steps.tfout.outputs.RG }}
+          --query "properties.provisioningState"

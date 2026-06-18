@@ -1,12 +1,17 @@
 # .github/workflows/validation.yml
+---
+name: "Terraform Validation"
+
 on:
   workflow_call:
-    inputs: {}
-    secrets: inherit
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   validation:
-    name: "🛡️ Terraform Validation"
+    name: "Terraform Validation"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -18,7 +23,6 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          enable-oidc: true
 
       - name: Terraform fmt (check)
         run: |

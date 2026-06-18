@@ -1,0 +1,55 @@
+# .github/workflows/main.yml
+---
+name: "CI/CD – Azure Cost Advisor"
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+jobs:
+  validation:
+    uses: ./.github/workflows/validation.yml
+    secrets: inherit
+
+  bootstrap:
+    needs: validation
+    uses: ./.github/workflows/bootstrap.yml
+    secrets: inherit
+
+  platform:
+    needs: bootstrap
+    uses: ./.github/workflows/platform.yml
+    secrets: inherit
+
+  postinfra:
+    needs: platform
+    uses: ./.github/workflows/postinfra.yml
+    secrets: inherit
+
+  build:
+    needs: postinfra
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  kvpopulate:
+    needs: build
+    uses: ./.github/workflows/kvpopulate.yml
+    secrets: inherit
+
+  helmdeploy:
+    needs: kvpopulate
+    uses: ./.github/workflows/helmdeploy.yml
+    secrets: inherit
+
+  agic:
+    needs: helmdeploy
+    uses: ./.github/workflows/agic.yml
+    secrets: inherit
+
+  smoke:
+    needs: agic
+    uses: ./.github/workflows/smoke.yml
+    secrets: inherit

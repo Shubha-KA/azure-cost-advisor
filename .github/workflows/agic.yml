@@ -1,0 +1,60 @@
+# .github/workflows/agic.yml
+---
+name: "AGIC Validation"
+
+on:
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  agic:
+    name: "AGIC Validation"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download infra/dev artefact
+        uses: actions/download-artifact@v4
+        with:
+          name: infra-dev
+          path: infra/dev
+
+      - name: Retrieve AKS credentials
+        run: |
+          RG=$(terraform -chdir=infra/dev output -raw resource_group_name)
+          AKS=$(terraform -chdir=infra/dev output -raw aks_cluster_name)
+          az aks get-credentials \
+            --resource-group $RG \
+            --name $AKS \
+            --overwrite-existing
+
+      - name: Verify AGIC pod is running
+        run: |
+          kubectl get pods -n kube-system \
+            -l app=ingress-appgw \
+            --field-selector=status.phase=Running
+
+      - name: List Ingress resources
+        run: kubectl get ingress --all-namespaces
+
+      - name: Verify Application Gateway health
+        run: |
+          RG=$(terraform -chdir=infra/dev output -raw resource_group_name)
+          AGW=$(terraform -chdir=infra/dev output -raw app_gateway_name 2>/dev/null || echo "")
+          if [ -n "$AGW" ]; then
+            az network application-gateway show \
+              -n $AGW -g $RG \
+              --query "operationalState"
+          else
+            echo "No Application Gateway output found – skipping probe"
+          fi
