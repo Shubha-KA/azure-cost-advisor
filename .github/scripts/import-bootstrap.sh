@@ -158,7 +158,28 @@ else
     echo "Resource already in state"
 fi
 
+# 10. Clean up any existing locks in Azure so Terraform isn't blocked
+echo "Checking for orphaned Management Locks to delete..."
+RG_LOCK_ID=$(az lock list --resource-group "$RG_NAME" $SUB_ARG --query "[?name=='terraform-state-resource-group-delete-lock'].id | [0]" -o tsv 2>/dev/null | tr -d '\r' || true)
+if [ -n "$RG_LOCK_ID" ]; then
+    echo "Deleting Resource Group Lock ($RG_LOCK_ID)..."
+    az lock delete --ids "$RG_LOCK_ID"
+fi
 
+if [ -n "$SA_ID" ]; then
+    SA_LOCK_ID=$(az lock list --resource "$SA_ID" $SUB_ARG --query "[?name=='terraform-state-storage-delete-lock'].id | [0]" -o tsv 2>/dev/null | tr -d '\r' || true)
+    if [ -n "$SA_LOCK_ID" ]; then
+        echo "Deleting Storage Account Lock ($SA_LOCK_ID)..."
+        az lock delete --ids "$SA_LOCK_ID"
+    fi
+    
+    CONTAINER_ID="${SA_ID}/blobServices/default/containers/tfstate"
+    CONT_LOCK_ID=$(az lock list --resource "$CONTAINER_ID" $SUB_ARG --query "[?name=='terraform-state-container-delete-lock'].id | [0]" -o tsv 2>/dev/null | tr -d '\r' || true)
+    if [ -n "$CONT_LOCK_ID" ]; then
+        echo "Deleting Container Lock ($CONT_LOCK_ID)..."
+        az lock delete --ids "$CONT_LOCK_ID"
+    fi
+fi
 
 echo "========================================="
 echo "Import process completed successfully."
