@@ -1,12 +1,13 @@
 # Azure Cost Optimization Advisor - Python 3.11
 pandas==2.2.3
-numpy>=1.23.2,<2
+numpy==2.1.0
 streamlit>=1.54.0,<2
 plotly==5.24.1
 altair>=4.0,<7,!=5.4.0,!=5.4.1
 python-dotenv>=1.2.2,<2
 pydantic==2.10.2
-pydantic-settings==2.6.1
+pydantic-settings>=2.14.1,<3
+packaging>=23.0,<24
 
 # Azure SDK
 azure-identity==1.19.0

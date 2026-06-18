@@ -1,83 +1,83 @@
-name: Deploy
-on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        type: choice
-        options: [dev]
-        required: true
-      target:
-        type: choice
-        options: [infrastructure, application]
-        required: true
-      image_tag:
-        description: Immutable image tag for application deployment
-        required: false
-permissions:
-  contents: read
-  id-token: write
-jobs:
-  deploy:
-    environment: ${{ inputs.environment }}
-    runs-on: [self-hosted, linux, finops-private]
-    concurrency: deploy-${{ inputs.environment }}-${{ inputs.target }}
-    env:
-      TF_VAR_entra_login_redirect_uris: ${{ vars.ENTRA_LOGIN_REDIRECT_URIS }}
-      TF_VAR_entra_post_logout_redirect_uri: ${{ vars.ENTRA_POST_LOGOUT_REDIRECT_URI }}
-      TF_VAR_frontend_url: ${{ vars.FRONTEND_URL }}
-      TF_VAR_api_cors_origins: ${{ vars.API_CORS_ORIGINS }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - uses: hashicorp/setup-terraform@v3
-      - uses: azure/setup-helm@v4
-      - name: Verify fixed AKS capacity
-        if: inputs.target == 'infrastructure'
-        shell: pwsh
-        run: |
-          $values = Get-Content "infra/dev/environments/${{ inputs.environment }}.tfvars" -Raw
-          if ($values -notmatch 'system_node_vm_size\s*=\s*"Standard_D2as_v5"') {
-            throw "AKS must use Standard_D2as_v5"
-          }
-          foreach ($setting in @("system_node_count", "system_node_min_count", "system_node_max_count")) {
-            if ($values -notmatch "$setting\s*=\s*1") {
-              throw "$setting must remain 1"
-            }
-          }
-      - name: Terraform init
-        run: >
-          terraform -chdir=infra/dev init -reconfigure
-          -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}"
-          -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}"
-          -backend-config="container_name=tfstate"
-          -backend-config="key=dev/aks-platform.tfstate"
-          -backend-config="use_azuread_auth=true"
-      - name: Terraform plan
-        if: inputs.target == 'infrastructure'
-        run: terraform -chdir=infra/dev plan -var-file=environments/${{ inputs.environment }}.tfvars -out=tfplan
-      - name: Terraform apply
-        if: inputs.target == 'infrastructure'
-        run: terraform -chdir=infra/dev apply -auto-approve tfplan
-      - name: Publish deployment outputs
-        if: inputs.target == 'infrastructure'
-        run: |
-          terraform -chdir=infra/dev output
-      - name: Deploy application
-        if: inputs.target == 'application'
-        shell: pwsh
-        run: |
-          if (-not "${{ inputs.image_tag }}") {
-            throw "image_tag is required for application deployment"
-          }
-          ./deploy/scripts/Deploy-Aks.ps1 `
-            -Environment ${{ inputs.environment }} `
-            -ImageTag "${{ inputs.image_tag }}"
-      - name: Verify rollout
-        if: inputs.target == 'application'
-        run: |
-          kubectl get pods --all-namespaces -l app.kubernetes.io/part-of=azure-cost-advisor
-          kubectl get ingress -n finops-edge
+# name: Deploy
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       environment:
+#         type: choice
+#         options: [dev]
+#         required: true
+#       target:
+#         type: choice
+#         options: [infrastructure, application]
+#         required: true
+#       image_tag:
+#         description: Immutable image tag for application deployment
+#         required: false
+# permissions:
+#   contents: read
+#   id-token: write
+# jobs:
+#   deploy:
+#     environment: ${{ inputs.environment }}
+#     runs-on: [self-hosted, linux, finops-private]
+#     concurrency: deploy-${{ inputs.environment }}-${{ inputs.target }}
+#     env:
+#       TF_VAR_entra_login_redirect_uris: ${{ vars.ENTRA_LOGIN_REDIRECT_URIS }}
+#       TF_VAR_entra_post_logout_redirect_uri: ${{ vars.ENTRA_POST_LOGOUT_REDIRECT_URI }}
+#       TF_VAR_frontend_url: ${{ vars.FRONTEND_URL }}
+#       TF_VAR_api_cors_origins: ${{ vars.API_CORS_ORIGINS }}
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: azure/login@v2
+#         with:
+#           client-id: ${{ vars.AZURE_CLIENT_ID }}
+#           tenant-id: ${{ vars.AZURE_TENANT_ID }}
+#           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+#       - uses: hashicorp/setup-terraform@v3
+#       - uses: azure/setup-helm@v4
+#       - name: Verify fixed AKS capacity
+#         if: inputs.target == 'infrastructure'
+#         shell: pwsh
+#         run: |
+#           $values = Get-Content "infra/dev/environments/${{ inputs.environment }}.tfvars" -Raw
+#           if ($values -notmatch 'system_node_vm_size\s*=\s*"Standard_D2as_v5"') {
+#             throw "AKS must use Standard_D2as_v5"
+#           }
+#           foreach ($setting in @("system_node_count", "system_node_min_count", "system_node_max_count")) {
+#             if ($values -notmatch "$setting\s*=\s*1") {
+#               throw "$setting must remain 1"
+#             }
+#           }
+#       - name: Terraform init
+#         run: >
+#           terraform -chdir=infra/dev init -reconfigure
+#           -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}"
+#           -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}"
+#           -backend-config="container_name=tfstate"
+#           -backend-config="key=dev/aks-platform.tfstate"
+#           -backend-config="use_azuread_auth=true"
+#       - name: Terraform plan
+#         if: inputs.target == 'infrastructure'
+#         run: terraform -chdir=infra/dev plan -var-file=environments/${{ inputs.environment }}.tfvars -out=tfplan
+#       - name: Terraform apply
+#         if: inputs.target == 'infrastructure'
+#         run: terraform -chdir=infra/dev apply -auto-approve tfplan
+#       - name: Publish deployment outputs
+#         if: inputs.target == 'infrastructure'
+#         run: |
+#           terraform -chdir=infra/dev output
+#       - name: Deploy application
+#         if: inputs.target == 'application'
+#         shell: pwsh
+#         run: |
+#           if (-not "${{ inputs.image_tag }}") {
+#             throw "image_tag is required for application deployment"
+#           }
+#           ./deploy/scripts/Deploy-Aks.ps1 `
+#             -Environment ${{ inputs.environment }} `
+#             -ImageTag "${{ inputs.image_tag }}"
+#       - name: Verify rollout
+#         if: inputs.target == 'application'
+#         run: |
+#           kubectl get pods --all-namespaces -l app.kubernetes.io/part-of=azure-cost-advisor
+#           kubectl get ingress -n finops-edge
