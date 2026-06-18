@@ -1,8 +1,10 @@
 # .github/workflows/helmdeploy.yml
+---
 on:
   workflow_call:
     inputs: {}
-    secrets: inherit
+    secrets:
+      inherit: true
 
 jobs:
   helmdeploy:
@@ -29,28 +31,35 @@ jobs:
         run: |
           RG=$(terraform -chdir=infra/dev output -raw resource_group_name)
           AKS=$(terraform -chdir=infra/dev output -raw aks_cluster_name)
-          az aks get-credentials --resource-group $RG --name $AKS --overwrite-existing
+          az aks get-credentials \
+            --resource-group $RG \
+            --name $AKS \
+            --overwrite-existing
 
       - name: Helm lint
         run: helm lint ./deploy/charts/azure-cost-advisor
 
       - name: Render Helm template (audit artefact)
         run: |
-          IMAGE_TAGS=$(cat image-manifest.json | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]')
+          IMAGE_TAGS=$(cat image-manifest.json \
+            | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]')
           helm template azure-cost-advisor ./deploy/charts/azure-cost-advisor \
             --set imageTag="${IMAGE_TAGS}" \
             --namespace finops-edge > helm-manifest.yaml
 
       - name: Deploy / upgrade Helm release
         run: |
-          IMAGE_TAGS=$(cat image-manifest.json | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]')
-          helm upgrade --install azure-cost-advisor ./deploy/charts/azure-cost-advisor \
+          IMAGE_TAGS=$(cat image-manifest.json \
+            | jq -r 'to_entries|map("\(.key)=\(.value)")|.[]')
+          helm upgrade --install azure-cost-advisor \
+            ./deploy/charts/azure-cost-advisor \
             --namespace finops-edge --create-namespace \
             --set imageTag="${IMAGE_TAGS}"
 
       - name: Wait for pods to become Ready (max 5 min)
         run: |
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/part-of=azure-cost-advisor \
+          kubectl wait --for=condition=Ready pod \
+            -l app.kubernetes.io/part-of=azure-cost-advisor \
             -n finops-edge --timeout=300s
 
       - name: Upload rendered Helm manifest
