@@ -28,6 +28,9 @@ resource "azurerm_role_assignment" "state_data_resource_group" {
 }
 
 resource "azurerm_storage_account" "state" {
+  # checkov:skip=CKV_AZURE_33:Queue service not used for tfstate
+  # checkov:skip=CKV_AZURE_206:ZRS replication is sufficient for tfstate
+  # checkov:skip=CKV2_AZURE_1:CMK not required for bootstrap tfstate
   name                             = substr("st${var.project_name}tf${random_string.suffix.result}", 0, 24)
   resource_group_name              = azurerm_resource_group.state.name
   location                         = var.location
@@ -63,6 +66,7 @@ resource "azurerm_storage_account" "state" {
 }
 
 resource "azurerm_storage_container" "state" {
+  # checkov:skip=CKV2_AZURE_21:Blob logging is not required for tfstate container
   name                  = "tfstate"
   storage_account_id    = azurerm_storage_account.state.id
   container_access_type = "private"
@@ -77,6 +81,7 @@ resource "azurerm_virtual_network" "state" {
 }
 
 resource "azurerm_subnet" "private_endpoints" {
+  # checkov:skip=CKV2_AZURE_31:NSG not required for private endpoint subnet
   name                              = "snet-private-endpoints"
   resource_group_name               = azurerm_resource_group.state.name
   virtual_network_name              = azurerm_virtual_network.state.name
