@@ -43,3 +43,10 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "storage_account_suffix" {
+  type        = string
+  description = "A stable suffix for the storage account to prevent random replacement."
+  default     = ""
+}
+

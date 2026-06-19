@@ -1,0 +1,167 @@
+# .github/workflows/application-ci.yml
+---
+name: "Application CI"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ci:
+    name: "Application CI"
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Testing Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest flake8 bandit
+
+      - name: Code Quality - Flake8
+        run: flake8 src/
+
+      - name: Code Quality - Bandit
+        run: bandit -r src/ -ll
+
+      - name: Code Quality - Pytest
+        run: pytest tests/
+
+      - name: SonarQube Scan
+        uses: sonarsource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=azure-cost-advisor
+            -Dsonar.organization=your-org
+            -Dsonar.qualitygate.wait=true
+
+      - name: Snyk Dependency Scan
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: test
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Bootstrap - Import to get ACR_NAME
+        id: acr
+        run: |
+          terraform -chdir=infra/bootstrap init -backend=false
+          chmod +x .github/scripts/import-bootstrap.sh
+          bash .github/scripts/import-bootstrap.sh
+          terraform -chdir=infra/bootstrap output -json > bootstrap-outputs.json
+          RG_NAME=$(jq -r .resource_group_name.value bootstrap-outputs.json)
+          SA_NAME=$(jq -r .storage_account_name.value bootstrap-outputs.json)
+          cat <<EOF > infra/dev/backend.dev.hcl
+          resource_group_name  = "$RG_NAME"
+          storage_account_name = "$SA_NAME"
+          container_name       = "tfstate"
+          key                  = "dev/aks-platform.tfstate"
+          use_azuread_auth     = true
+          EOF
+          terraform -chdir=infra/dev init -reconfigure -backend-config=backend.dev.hcl
+          echo "acr_name=$(terraform -chdir=infra/dev output -raw acr_name)" >> $GITHUB_OUTPUT
+
+      - name: ACR login
+        run: az acr login -n ${{ steps.acr.outputs.acr_name }}
+
+      - name: Build & push frontend
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/frontend:${IMAGE_TAG}
+          docker build -f frontend/Dockerfile -t $IMAGE frontend/
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/frontend:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/frontend:latest
+
+      - name: Build & push auth-service
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/auth-service:${IMAGE_TAG}
+          docker build -f deploy/Dockerfile.service --build-arg SERVICE_MODULE=src.microservices.auth_service -t $IMAGE .
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/auth-service:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/auth-service:latest
+
+      - name: Build & push api-gateway
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/api-gateway:${IMAGE_TAG}
+          docker build -f Dockerfile.api -t $IMAGE .
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/api-gateway:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/api-gateway:latest
+
+      - name: Build & push collection-service
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/collection-service:${IMAGE_TAG}
+          docker build -f deploy/Dockerfile.service --build-arg SERVICE_MODULE=src.microservices.collection_service -t $IMAGE .
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/collection-service:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/collection-service:latest
+
+      - name: Build & push processing-service
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/processing-service:${IMAGE_TAG}
+          docker build -f deploy/Dockerfile.service --build-arg SERVICE_MODULE=src.microservices.processing_service -t $IMAGE .
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/processing-service:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/processing-service:latest
+
+      - name: Build & push ai-service
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/ai-service:${IMAGE_TAG}
+          docker build -f deploy/Dockerfile.service --build-arg SERVICE_MODULE=src.microservices.ai_service -t $IMAGE .
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/ai-service:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/ai-service:latest
+
+      - name: Build & push notification-service
+        run: |
+          IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/notification-service:${IMAGE_TAG}
+          docker build -f deploy/Dockerfile.service --build-arg SERVICE_MODULE=src.microservices.notification_service -t $IMAGE .
+          docker push $IMAGE
+          docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/notification-service:latest
+          docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/notification-service:latest
+
+      - name: Trivy Container Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.acr.outputs.acr_name }}.azurecr.io/frontend:${{ env.IMAGE_TAG }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Publish Build Summary
+        run: |
+          echo "### Build Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "Images pushed with tag: \`${IMAGE_TAG}\` and \`latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- frontend" >> $GITHUB_STEP_SUMMARY
+          echo "- auth-service" >> $GITHUB_STEP_SUMMARY
+          echo "- api-gateway" >> $GITHUB_STEP_SUMMARY
+          echo "- collection-service" >> $GITHUB_STEP_SUMMARY
+          echo "- processing-service" >> $GITHUB_STEP_SUMMARY
+          echo "- ai-service" >> $GITHUB_STEP_SUMMARY
+          echo "- notification-service" >> $GITHUB_STEP_SUMMARY

@@ -5,6 +5,7 @@ resource "random_string" "suffix" {
 }
 
 locals {
+  suffix = var.storage_account_suffix != "" ? var.storage_account_suffix : random_string.suffix.result
   prefix = "${var.project_name}-tfstate"
   tags = merge(var.tags, {
     application = "azure-cost-advisor"
@@ -31,7 +32,7 @@ resource "azurerm_storage_account" "state" {
   # checkov:skip=CKV_AZURE_33:Queue service not used for tfstate
   # checkov:skip=CKV_AZURE_206:ZRS replication is sufficient for tfstate
   # checkov:skip=CKV2_AZURE_1:CMK not required for bootstrap tfstate
-  name                             = substr("st${var.project_name}tf${random_string.suffix.result}", 0, 24)
+  name                             = substr("st${var.project_name}tf${local.suffix}", 0, 24)
   resource_group_name              = azurerm_resource_group.state.name
   location                         = var.location
   account_tier                     = "Standard"
