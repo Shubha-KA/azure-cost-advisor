@@ -252,14 +252,15 @@ class AuthApplicationService:
         headers = {"Authorization": f"Bearer {request.cookies.get(SESSION_COOKIE, '')}"}
         async def _trigger():
             async with httpx.AsyncClient(timeout=10) as client:
-                try:
-                    await client.post(
-                        f"{self.settings.collection_service_url}/internal/collections",
-                        json={},
-                        headers=headers
-                    )
-                except httpx.RequestError:
-                    pass
+                for sub_id in subscription_ids:
+                    try:
+                        await client.post(
+                            f"{self.settings.collection_service_url}/internal/collections",
+                            json={"tenantId": session.tenant_id, "subscriptionId": sub_id},
+                            headers=headers
+                        )
+                    except httpx.RequestError:
+                        pass
         import asyncio
         asyncio.create_task(_trigger())
 
