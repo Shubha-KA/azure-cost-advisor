@@ -5,16 +5,20 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import uuid
+from datetime import timedelta
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Body, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from src.api.security import SESSION_COOKIE, SessionTokenService, get_identity, tenant_scope
-from src.auth.entra import EntraAuthService
+from src.auth.entra import EntraAuthService, AuthSession
+from src.domain.models import ServerSession, utc_now
 from src.compliance.lifecycle import TenantLifecycleService
 from src.events.contracts import EventType, PlatformEvent
 from src.onboarding.service import TenantOnboardingService
+import httpx
 
 FLOW_COOKIE = "finops_auth_flow"
 
@@ -66,9 +70,10 @@ class AuthApplicationService:
         session = EntraAuthService(self.settings).complete_login(
             flow, dict(request.query_params)
         )
-        TenantOnboardingService(
+        onboarding_service = TenantOnboardingService(
             self.settings, storage=self.storage
-        ).register_authenticated_user(session)
+        )
+        onboarding_service.register_authenticated_user(session)
         self.events.publish(
             PlatformEvent(
                 eventType=EventType.TENANT_ONBOARDED,
@@ -92,7 +97,15 @@ class AuthApplicationService:
                 "roles": user.roles,
             }
         )
-        response = RedirectResponse(f"{self.settings.frontend_url}/dashboard")
+
+        # Determine redirect destination based on tenant onboarding status
+        tenant = self.storage.tenants.get(session.profile.tenant_id)
+        if tenant and tenant.onboarding_status == "completed":
+            redirect_path = "/dashboard"
+        else:
+            redirect_path = "/onboarding"
+
+        response = RedirectResponse(f"{self.settings.frontend_url}{redirect_path}")
         response.set_cookie(
             SESSION_COOKIE,
             token,
@@ -101,6 +114,27 @@ class AuthApplicationService:
             samesite="lax",
             max_age=8 * 60 * 60,
         )
+        
+        # Save Entra session server-side to avoid cookie limits
+        session_id = str(uuid.uuid4())
+        server_session = ServerSession(
+            session_id=session_id,
+            tenant_id=session.profile.tenant_id,
+            user_id=session.profile.user_id,
+            auth_session=session.model_dump(by_alias=True, mode="json"),
+            expires_at=utc_now() + timedelta(hours=8),
+        )
+        self.storage.sessions.upsert(server_session)
+        
+        response.set_cookie(
+            "finops_sid",
+            session_id,
+            httponly=True,
+            secure=self.settings.api_session_cookie_secure,
+            samesite="lax",
+            max_age=8 * 60 * 60,
+        )
+
         response.delete_cookie(FLOW_COOKIE)
         return response
 
@@ -112,6 +146,7 @@ class AuthApplicationService:
         )
         response = RedirectResponse(url, status_code=303)
         response.delete_cookie(SESSION_COOKIE)
+        response.delete_cookie("finops_sid")
         return response
 
     def me(self, request: Request):
@@ -154,3 +189,91 @@ class AuthApplicationService:
         return lifecycle.request_deletion(
             tenant_id, str(body.get("requestedBy") or identity.user_id)
         )
+
+    def _get_entra_session(self, request: Request) -> AuthSession:
+        session_id = request.cookies.get("finops_sid")
+        if not session_id:
+            raise HTTPException(401, "Missing Entra session for onboarding")
+        try:
+            server_session = self.storage.sessions.get(session_id)
+            if not server_session:
+                raise HTTPException(401, "Invalid or expired Entra session")
+            if server_session.expires_at < utc_now():
+                self.storage.sessions.delete(session_id)
+                raise HTTPException(401, "Entra session expired")
+            return AuthSession.model_validate(server_session.auth_session)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(401, "Failed to load Entra session") from exc
+
+    def onboarding_status(self, request: Request):
+        identity = get_identity(request)
+        tenant = self.storage.tenants.get(identity.tenant_id)
+        if not tenant:
+            return {"status": "unknown"}
+        if tenant.onboarding_status != "completed":
+            return {"status": tenant.onboarding_status}
+        
+        runs = self.storage.collection_runs.list(identity.tenant_id)
+        if not runs:
+            return {"status": "pending_collection"}
+        
+        if any(r.status == "running" for r in runs):
+            return {"status": "collecting"}
+            
+        if any(r.status == "completed" for r in runs):
+            return {"status": "ready"}
+            
+        return {"status": "completed"}
+
+    def discover_subscriptions(self, request: Request):
+        get_identity(request)  # ensure authenticated
+        session = self._get_entra_session(request)
+        service = TenantOnboardingService(self.settings, self.storage)
+        discovered = service.discover_subscriptions(session)
+        return [
+            item.model_dump(by_alias=True)
+            for item in discovered
+            if item.state == "Enabled"
+        ]
+
+    async def select_subscriptions(self, request: Request, body: dict):
+        identity = get_identity(request)
+        session = self._get_entra_session(request)
+        subscription_ids = body.get("subscriptionIds", [])
+        if not subscription_ids:
+            raise HTTPException(400, "No subscriptions provided")
+
+        service = TenantOnboardingService(self.settings, self.storage)
+        discovered = service.discover_subscriptions(session)
+        service.persist_selected_subscriptions(session, discovered, subscription_ids)
+        
+        health_records = service.validate_subscriptions(session, subscription_ids)
+        if any(item.validation_status == "failed" for item in health_records):
+            return {
+                "success": False,
+                "validationResults": [item.model_dump(by_alias=True, mode="json") for item in health_records]
+            }
+
+        service.complete_onboarding(session, subscription_ids)
+
+        # Trigger first collection run asynchronously
+        headers = {"Authorization": f"Bearer {request.cookies.get(SESSION_COOKIE, '')}"}
+        async def _trigger():
+            async with httpx.AsyncClient(timeout=10) as client:
+                try:
+                    await client.post(
+                        f"{self.settings.collection_service_url}/internal/collections",
+                        json={},
+                        headers=headers
+                    )
+                except httpx.RequestError:
+                    pass
+        import asyncio
+        asyncio.create_task(_trigger())
+
+        return {
+            "success": True,
+            "validationResults": [item.model_dump(by_alias=True, mode="json") for item in health_records]
+        }

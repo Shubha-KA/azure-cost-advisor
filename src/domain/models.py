@@ -13,6 +13,16 @@ from src.domain.ids import deterministic_id
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
+class ServerSession(BaseModel):
+    session_id: str = Field(alias="sessionId", min_length=1)
+    tenant_id: str = Field(alias="tenantId", min_length=1)
+    user_id: str = Field(alias="userId", min_length=1)
+    auth_session: dict[str, Any] = Field(default_factory=dict, alias="authSession")
+    expires_at: datetime = Field(alias="expiresAt")
+    
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+
 
 class DomainModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")

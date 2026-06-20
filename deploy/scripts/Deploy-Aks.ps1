@@ -25,7 +25,7 @@ if (-not (Test-Path $values)) {
     throw "Helm values file not found: $values"
 }
 
-$outputs = terraform -chdir=$terraformRoot output -json | ConvertFrom-Json
+$outputs = terraform "-chdir=$terraformRoot" output -json | ConvertFrom-Json
 $resourceGroup = $outputs.resource_group_name.value
 $clusterName = $outputs.aks_cluster_name.value
 $vaultName = $outputs.key_vault_name.value

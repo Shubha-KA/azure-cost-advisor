@@ -39,7 +39,7 @@ resource "azurerm_storage_account" "state" {
   account_replication_type         = "ZRS"
   min_tls_version                  = "TLS1_2"
   shared_access_key_enabled        = false
-  public_network_access_enabled    = false
+  public_network_access_enabled    = true
   allow_nested_items_to_be_public  = false
   cross_tenant_replication_enabled = false
   default_to_oauth_authentication  = true

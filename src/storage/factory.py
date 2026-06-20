@@ -12,6 +12,7 @@ from src.adapters.filesystem import (
     FileTenantRepository,
     FileTenantHealthRepository,
     FileTenantUserRepository,
+    FileSessionRepository,
 )
 from src.config import Settings, get_settings
 from src.repositories.errors import StorageConfigurationError
@@ -33,6 +34,7 @@ def create_storage_provider(settings: Settings | None = None) -> StorageProvider
             resources=FileResourceRepository(root),
             recommendations=FileRecommendationRepository(root),
             processing_metadata=FileProcessingMetadataRepository(root),
+            sessions=FileSessionRepository(root),
         )
     if provider == "cosmos":
         from src.adapters.blob.raw_payloads import BlobRawPayloadRepository
@@ -60,6 +62,7 @@ def create_storage_provider(settings: Settings | None = None) -> StorageProvider
             resources=cosmos.resources,
             recommendations=cosmos.recommendations,
             processing_metadata=cosmos.processing_metadata,
+            sessions=cosmos.sessions,
         )
     raise StorageConfigurationError(
         f"Unsupported STORAGE_PROVIDER={settings.storage_provider!r}"

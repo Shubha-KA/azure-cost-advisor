@@ -22,3 +22,8 @@ tags = {
   owner       = "finops-platform"
   cost_center = "dev"
 }
+
+frontend_url = "https://vkcolors.shop"
+entra_post_logout_redirect_uri = "https://vkcolors.shop"
+api_cors_origins = "https://vkcolors.shop"
+entra_login_redirect_uris = ["https://vkcolors.shop/api/auth/callback"]

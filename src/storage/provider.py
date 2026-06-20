@@ -12,6 +12,7 @@ from src.repositories.interfaces import (
     TenantRepository,
     TenantHealthRepository,
     TenantUserRepository,
+    SessionRepository,
 )
 
 
@@ -26,3 +27,4 @@ class StorageProvider:
     resources: ResourceRepository
     recommendations: RecommendationRepository
     processing_metadata: ProcessingMetadataRepository
+    sessions: SessionRepository

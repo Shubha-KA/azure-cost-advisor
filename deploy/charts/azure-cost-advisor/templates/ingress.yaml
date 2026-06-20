@@ -33,7 +33,6 @@ metadata:
   name: api-gateway
   namespace: finops-edge
   annotations:
-    appgw.ingress.kubernetes.io/backend-path-prefix: /
     appgw.ingress.kubernetes.io/health-probe-path: /health/ready
     {{- if .Values.global.ingress.sslCertificateName }}
     appgw.ingress.kubernetes.io/appgw-ssl-certificate: {{ .Values.global.ingress.sslCertificateName | quote }}
@@ -47,7 +46,7 @@ spec:
       {{- end }}
       http:
         paths:
-          - path: /backend
+          - path: /api
             pathType: Prefix
             backend:
               service:

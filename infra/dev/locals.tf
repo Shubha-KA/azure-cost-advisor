@@ -50,6 +50,7 @@ locals {
     processingMetadata = {}
     aiExecutions       = {}
     auditEvents        = {}
+    authSessions       = {}
   }
 
   private_dns_zones = {

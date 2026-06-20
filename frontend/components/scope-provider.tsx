@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
 
 type Entity = { tenantId: string; subscriptionId?: string; displayName?: string };
 type ScopeContextValue = {
@@ -27,17 +28,22 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
     tenantId: "",
     subscriptionId: "",
   });
+  const pathname = usePathname();
+  const isPublicPage = pathname === "/login";
 
   useEffect(() => {
+    if (isPublicPage) return;
     api<Entity[]>("/api/tenants")
       .then((items) => {
         setTenants(items);
-        const tenantId =
-          localStorage.getItem("tenantId") || items[0]?.tenantId || "";
-        setScope((value) => ({ ...value, tenantId }));
+        let tenantId = localStorage.getItem("tenantId");
+        if (!items.find((i) => i.tenantId === tenantId)) {
+          tenantId = items[0]?.tenantId || "";
+        }
+        setScope((value) => ({ ...value, tenantId: tenantId as string }));
       })
       .catch(() => setTenants([]));
-  }, []);
+  }, [isPublicPage]);
 
   useEffect(() => {
     if (!scope.tenantId) return;
@@ -47,11 +53,11 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
     })
       .then((items) => {
         setSubscriptions(items);
-        const subscriptionId =
-          localStorage.getItem("subscriptionId") ||
-          items[0]?.subscriptionId ||
-          "";
-        setScope((value) => ({ ...value, subscriptionId }));
+        let subscriptionId = localStorage.getItem("subscriptionId");
+        if (!items.find((i) => i.subscriptionId === subscriptionId)) {
+          subscriptionId = items[0]?.subscriptionId || "";
+        }
+        setScope((value) => ({ ...value, subscriptionId: subscriptionId as string }));
       })
       .catch(() => setSubscriptions([]));
   }, [scope.tenantId]);

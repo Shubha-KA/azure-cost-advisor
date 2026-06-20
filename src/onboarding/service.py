@@ -27,9 +27,17 @@ class TenantOnboardingService:
         self.access_client_factory = access_client_factory or AzureAccessClient
 
     def register_authenticated_user(self, session: AuthSession) -> None:
+        """Register or update user in their Entra tenant.
+
+        - If the tenant does not exist, auto-create it with onboardingStatus='pending'.
+        - The first user in any tenant is assigned the 'tenant_admin' role.
+        - Subsequent users receive the 'tenant_user' role.
+        Returns True if the tenant is newly created (needs onboarding), False otherwise.
+        """
         profile = session.profile
         correlation_id = str(uuid4())
         existing = self.storage.tenants.get(profile.tenant_id)
+        is_new_tenant = existing is None
         tenant = Tenant(
             tenantId=profile.tenant_id,
             displayName=(
@@ -37,9 +45,9 @@ class TenantOnboardingService:
                 if existing and existing.display_name
                 else profile.display_name or profile.tenant_id
             ),
-            status="active",
+            status="active" if existing else "pending",
             onboardingStatus=(
-                existing.onboarding_status if existing else "in_progress"
+                existing.onboarding_status if existing else "not_started"
             ),
             correlationId=correlation_id,
         )
@@ -65,6 +73,7 @@ class TenantOnboardingService:
         )
         self.storage.tenants.upsert(profile.tenant_id, tenant)
         self.storage.tenant_users.upsert(profile.tenant_id, user)
+        return is_new_tenant
 
     def discover_subscriptions(
         self, session: AuthSession

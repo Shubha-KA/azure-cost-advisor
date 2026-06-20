@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL ?? "/backend";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export type Scope = { tenantId: string; subscriptionId: string };
 
@@ -20,6 +20,10 @@ export async function api<T>(
     cache: "no-store",
   });
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.location.href = `${API}/api/auth/logout`;
+      return new Promise(() => {}) as Promise<T>;
+    }
     const detail = await response.text();
     throw new Error(detail || `Request failed: ${response.status}`);
   }

@@ -33,7 +33,7 @@ spec:
       containers:
         - name: {{ $name }}
           image: "{{ required (printf "image.repository is required for %s" $name) $service.image.repository }}:{{ required (printf "image.tag is required for %s" $name) $service.image.tag }}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
             - |

@@ -16,6 +16,7 @@ from src.domain.models import (
     Tenant,
     TenantHealth,
     TenantUser,
+    ServerSession,
 )
 from src.repositories.errors import RepositoryError, TenantScopeError
 from src.repositories.results import WriteResult
@@ -308,6 +309,38 @@ class CosmosProcessingMetadataRepository(_CosmosRepositoryBase):
         ]
 
 
+class CosmosSessionRepository:
+    def __init__(self, container) -> None:
+        self.container = container
+
+    def upsert(self, entity: ServerSession) -> WriteResult:
+        self.container.upsert_item(_document(entity, entity.session_id))
+        return WriteResult(updated=1)
+
+    def get(self, session_id: str) -> ServerSession | None:
+        try:
+            row = self.container.read_item(
+                item=session_id,
+                partition_key=session_id,
+            )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                return None
+            raise RepositoryError(f"Cosmos NoSQL read failed: {exc}") from exc
+        return _model(ServerSession, row)
+
+    def delete(self, session_id: str) -> None:
+        try:
+            self.container.delete_item(
+                item=session_id,
+                partition_key=session_id,
+            )
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                return
+            raise RepositoryError(f"Cosmos NoSQL delete failed: {exc}") from exc
+
+
 @dataclass
 class CosmosRepositories:
     settings: Any
@@ -343,6 +376,7 @@ class CosmosRepositories:
                 "resources",
                 "recommendations",
                 "processingMetadata",
+                "authSessions",
             )
         }
         self.tenants = CosmosTenantRepository(containers["tenants"])
@@ -364,4 +398,7 @@ class CosmosRepositories:
         )
         self.processing_metadata = CosmosProcessingMetadataRepository(
             containers["processingMetadata"]
+        )
+        self.sessions = CosmosSessionRepository(
+            containers["authSessions"]
         )

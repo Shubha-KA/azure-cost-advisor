@@ -52,7 +52,7 @@ class Settings(BaseSettings):
         default="", alias="AZURE_FEDERATED_TOKEN_FILE"
     )
     entra_authority: str = Field(
-        default="https://login.microsoftonline.com/organizations",
+        default="https://login.microsoftonline.com/common",
         alias="ENTRA_AUTHORITY",
     )
     entra_redirect_uri: str = Field(

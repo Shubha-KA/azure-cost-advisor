@@ -57,7 +57,6 @@ resource "azuread_application" "internal_api" {
   display_name     = "azure-cost-advisor-${var.environment}-internal-api"
   sign_in_audience = "AzureADMyOrg"
   owners           = [data.azuread_client_config.current.object_id]
-  identifier_uris  = ["api://azure-cost-advisor-services"]
 
   app_role {
     allowed_member_types = ["Application"]
@@ -138,7 +137,7 @@ locals {
     service-bus-namespace                 = module.service_bus.namespace_fqdn
     service-bus-topic                     = "finops-events"
     event-provider                        = "service_bus"
-    internal-api-audience                 = "api://azure-cost-advisor-services"
+    internal-api-audience                 = azuread_application.internal_api.client_id
     auth-service-url                      = "http://auth-service.finops-auth.svc.cluster.local:8000"
     collection-service-url                = "http://collection-service.finops-collection.svc.cluster.local:8000"
     processing-service-url                = "http://processing-service.finops-processing.svc.cluster.local:8000"

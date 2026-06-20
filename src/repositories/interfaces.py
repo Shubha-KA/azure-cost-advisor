@@ -12,6 +12,7 @@ from src.domain.models import (
     Tenant,
     TenantHealth,
     TenantUser,
+    ServerSession,
 )
 from src.repositories.results import WriteResult
 
@@ -100,3 +101,9 @@ class ProcessingMetadataRepository(Protocol):
     def list_latest(
         self, tenant_id: str, subscription_id: str
     ) -> list[dict[str, Any]]: ...
+
+
+class SessionRepository(Protocol):
+    def upsert(self, entity: ServerSession) -> WriteResult: ...
+    def get(self, session_id: str) -> ServerSession | None: ...
+    def delete(self, session_id: str) -> None: ...

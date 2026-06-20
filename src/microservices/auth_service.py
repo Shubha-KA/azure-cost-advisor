@@ -23,7 +23,7 @@ def callback(request: Request):
     return app.state.application.callback(request)
 
 
-@app.post("/api/auth/logout")
+@app.get("/api/auth/logout")
 def logout():
     return app.state.application.logout()
 
@@ -51,3 +51,18 @@ def tenant_health(request: Request):
 @app.post("/api/tenants/{tenant_id}/offboarding")
 def offboard(tenant_id: str, request: Request, body: dict = Body(default={})):
     return app.state.application.offboard(tenant_id, request, body)
+
+
+@app.get("/api/onboarding/status")
+def onboarding_status(request: Request):
+    return app.state.application.onboarding_status(request)
+
+
+@app.get("/api/onboarding/subscriptions/discover")
+def discover_subscriptions(request: Request):
+    return app.state.application.discover_subscriptions(request)
+
+
+@app.post("/api/onboarding/subscriptions/select")
+async def select_subscriptions(request: Request, body: dict = Body(...)):
+    return await app.state.application.select_subscriptions(request, body)

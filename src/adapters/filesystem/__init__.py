@@ -17,6 +17,7 @@ from src.domain.models import (
     Tenant,
     TenantHealth,
     TenantUser,
+    ServerSession,
 )
 from src.repositories.errors import RepositoryError, TenantScopeError
 from src.repositories.results import WriteResult
@@ -351,3 +352,28 @@ class FileProcessingMetadataRepository(_FileRepositoryBase):
             key=lambda row: str(row.get("startedAt") or row.get("sourceTimestamp") or ""),
             reverse=True,
         )[:20]
+
+
+class FileSessionRepository:
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root) / "sessions"
+
+    def _path(self, session_id: str) -> Path:
+        return self.root / f"{_safe_part(session_id)}.json"
+
+    def upsert(self, entity: ServerSession) -> WriteResult:
+        path = self._path(entity.session_id)
+        existed = path.exists()
+        _write_json(path, entity.model_dump(by_alias=True, mode="json"))
+        return WriteResult(inserted=0 if existed else 1, updated=1 if existed else 0, path=str(path))
+
+    def get(self, session_id: str) -> ServerSession | None:
+        path = self._path(session_id)
+        if not path.exists():
+            return None
+        return ServerSession.model_validate(_read_json(path))
+
+    def delete(self, session_id: str) -> None:
+        path = self._path(session_id)
+        if path.exists():
+            path.unlink()

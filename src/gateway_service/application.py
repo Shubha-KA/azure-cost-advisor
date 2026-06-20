@@ -24,6 +24,7 @@ ROUTES = {
     "recommendations": RouteTarget("processing_service_url", "/internal"),
     "chat": RouteTarget("ai_service_url", "/internal"),
     "inventory": RouteTarget("ai_service_url", "/internal"),
+    "onboarding": RouteTarget("auth_service_url", "/api", requires_subscription=False),
 }
 
 PUBLIC_AUTH_PATHS = {"auth/login", "auth/callback"}
