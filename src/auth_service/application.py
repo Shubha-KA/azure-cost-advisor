@@ -215,17 +215,7 @@ class AuthApplicationService:
         if tenant.onboarding_status != "completed":
             return {"status": tenant.onboarding_status}
         
-        runs = self.storage.collection_runs.list(identity.tenant_id)
-        if not runs:
-            return {"status": "pending_collection"}
-        
-        if any(r.status == "running" for r in runs):
-            return {"status": "collecting"}
-            
-        if any(r.status == "completed" for r in runs):
-            return {"status": "ready"}
-            
-        return {"status": "completed"}
+        return {"status": "ready"}
 
     def discover_subscriptions(self, request: Request):
         get_identity(request)  # ensure authenticated

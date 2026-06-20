@@ -90,6 +90,8 @@ class GatewayApplicationService:
             headers["X-Tenant-ID"] = tenant_id
         if subscription_id:
             headers["X-Subscription-ID"] = subscription_id
+        if content_type := request.headers.get("Content-Type"):
+            headers["Content-Type"] = content_type
         if route.setting_name == "auth_service_url":
             if authorization := request.headers.get("Authorization"):
                 headers["Authorization"] = authorization
