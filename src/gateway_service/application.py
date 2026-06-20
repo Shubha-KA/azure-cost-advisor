@@ -102,8 +102,13 @@ class GatewayApplicationService:
                 request.app.state.settings.internal_api_audience.rstrip("/")
                 + "/.default"
             )
-            service_token = request.app.state.service_credential.get_token(scope)
-            headers["Authorization"] = f"Bearer {service_token.token}"
+            try:
+                service_token = request.app.state.service_credential.get_token(scope)
+                headers["Authorization"] = f"Bearer {service_token.token}"
+            except Exception as e:
+                import logging
+                logging.getLogger("finops.api.audit").error(f"Failed to get token: {e}")
+                raise HTTPException(500, f"Token error: {e}")
         body = await request.body()
 
         async def send():

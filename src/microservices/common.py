@@ -59,4 +59,6 @@ def require_internal(request: Request) -> dict:
             options={"require": ["exp", "iat", "aud"]},
         )
     except jwt.PyJWTError as exc:
+        import logging
+        logging.getLogger(__name__).error(f"PyJWTError: {exc}")
         raise HTTPException(401, "Invalid service token") from exc
