@@ -319,21 +319,27 @@ class CosmosSessionRepository:
 
     def get(self, session_id: str) -> ServerSession | None:
         try:
-            row = self.container.read_item(
-                item=session_id,
-                partition_key=session_id,
+            rows = list(
+                self.container.query_items(
+                    query="SELECT * FROM c WHERE c.id = @sessionId",
+                    parameters=[{"name": "@sessionId", "value": session_id}],
+                    enable_cross_partition_query=True,
+                )
             )
-        except Exception as exc:
-            if getattr(exc, "status_code", None) == 404:
+            if not rows:
                 return None
+            return _model(ServerSession, rows[0])
+        except Exception as exc:
             raise RepositoryError(f"Cosmos NoSQL read failed: {exc}") from exc
-        return _model(ServerSession, row)
 
     def delete(self, session_id: str) -> None:
+        session = self.get(session_id)
+        if not session:
+            return
         try:
             self.container.delete_item(
                 item=session_id,
-                partition_key=session_id,
+                partition_key=session.tenant_id,
             )
         except Exception as exc:
             if getattr(exc, "status_code", None) == 404:
