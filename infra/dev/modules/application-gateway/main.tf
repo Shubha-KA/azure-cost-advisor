@@ -29,6 +29,32 @@ resource "azurerm_web_application_firewall_policy" "this" {
   }
 
   managed_rules {
+    exclusion {
+      match_variable          = "RequestArgNames"
+      selector_match_operator = "Equals"
+      selector                = "code"
+    }
+    exclusion {
+      match_variable          = "RequestArgNames"
+      selector_match_operator = "Equals"
+      selector                = "state"
+    }
+    exclusion {
+      match_variable          = "RequestArgNames"
+      selector_match_operator = "Equals"
+      selector                = "session_state"
+    }
+    exclusion {
+      match_variable          = "RequestCookieNames"
+      selector_match_operator = "Equals"
+      selector                = "finops_auth_flow"
+    }
+    exclusion {
+      match_variable          = "RequestCookieNames"
+      selector_match_operator = "Equals"
+      selector                = "finops_session"
+    }
+
     managed_rule_set {
       type    = "OWASP"
       version = "3.2"
