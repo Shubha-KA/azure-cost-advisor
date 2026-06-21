@@ -30,6 +30,10 @@ class ValidationCheck(BaseModel):
     mandatory: bool
     message: str
     http_status: int | None = Field(default=None, alias="httpStatus")
+    required_permission: str = Field(default="", alias="requiredPermission")
+    why_required: str = Field(default="", alias="whyRequired")
+    approval_url: str = Field(default="", alias="approvalUrl")
+    approver: str = ""
 
     model_config = {"populate_by_name": True}
 
@@ -73,6 +77,10 @@ class AzureAccessClient:
         self, subscription_id: str
     ) -> dict[str, ValidationCheck]:
         scope = f"/subscriptions/{subscription_id}"
+        approval_url = (
+            "https://portal.azure.com/#view/Microsoft_Azure_IAM/"
+            f"AccessControlMenuBlade/~/roleAssignments/scope/{scope}"
+        )
         return {
             "authentication": ValidationCheck(
                 name="Authentication",
@@ -81,16 +89,24 @@ class AzureAccessClient:
                 message="Delegated ARM token is available"
                 if self.access_token
                 else "No delegated ARM token is available",
+                requiredPermission="Microsoft Entra sign-in",
+                whyRequired="The platform needs a delegated Azure Resource Manager token before it can validate subscription access.",
+                approvalUrl="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+                approver="A Microsoft Entra administrator or application administrator can approve application consent if your tenant requires it.",
             ),
             "subscriptionAccess": self._check(
-                "Subscription access (Reader)",
+                "Reader",
                 True,
                 "GET",
-                f"{ARM_ENDPOINT}{scope}",
-                params={"api-version": "2022-12-01"},
+                f"{ARM_ENDPOINT}{scope}/resources",
+                params={"api-version": "2021-04-01", "$top": 1},
+                required_permission="Reader",
+                why_required="Required to discover Azure resources and correlate inventory with cost and recommendations.",
+                approval_url=approval_url,
+                approver="A subscription Owner or User Access Administrator can assign Reader on this subscription.",
             ),
             "costManagement": self._check(
-                "Cost Management access",
+                "Cost Management Reader",
                 True,
                 "POST",
                 f"{ARM_ENDPOINT}{scope}/providers/Microsoft.CostManagement/query",
@@ -108,6 +124,10 @@ class AzureAccessClient:
                         },
                     },
                 },
+                required_permission="Cost Management Reader",
+                why_required="Required to read cost and usage records used for spend analytics, top-cost resources, and savings calculations.",
+                approval_url=approval_url,
+                approver="A subscription Owner, Cost Management administrator, or User Access Administrator can assign Cost Management Reader.",
             ),
             "resourceGraph": self._check(
                 "Resource Graph access",
@@ -120,20 +140,32 @@ class AzureAccessClient:
                     "query": "Resources | project id | take 1",
                     "options": {"resultFormat": "objectArray"},
                 },
+                required_permission="Resource Graph access",
+                why_required="Required to query Azure Resource Graph for subscription-wide resource inventory during collection.",
+                approval_url=approval_url,
+                approver="A subscription Owner or User Access Administrator should ensure Reader access is assigned; Resource Graph is accessed through Azure Resource Manager.",
             ),
             "advisor": self._check(
-                "Azure Advisor access",
-                False,
+                "Advisor Reader",
+                True,
                 "GET",
                 f"{ARM_ENDPOINT}{scope}/providers/Microsoft.Advisor/recommendations",
                 params={"api-version": "2023-01-01", "$top": 1},
+                required_permission="Advisor Reader",
+                why_required="Required to read Azure Advisor recommendations and convert them into actionable optimization guidance.",
+                approval_url=approval_url,
+                approver="A subscription Owner or User Access Administrator can assign Advisor Reader on this subscription.",
             ),
             "monitor": self._check(
-                "Azure Monitor access",
-                False,
+                "Monitoring Reader",
+                True,
                 "GET",
                 f"{ARM_ENDPOINT}{scope}/providers/Microsoft.Insights/metricAlerts",
                 params={"api-version": "2018-03-01"},
+                required_permission="Monitoring Reader",
+                why_required="Required to read Azure Monitor configuration and metrics used for utilization and underused-resource analysis.",
+                approval_url=approval_url,
+                approver="A subscription Owner or User Access Administrator can assign Monitoring Reader on this subscription.",
             ),
         }
 
@@ -143,6 +175,10 @@ class AzureAccessClient:
         mandatory: bool,
         method: str,
         url: str,
+        required_permission: str = "",
+        why_required: str = "",
+        approval_url: str = "",
+        approver: str = "",
         **kwargs: Any,
     ) -> ValidationCheck:
         try:
@@ -159,6 +195,10 @@ class AzureAccessClient:
                 status="error",
                 mandatory=mandatory,
                 message=f"Azure request failed: {exc}",
+                requiredPermission=required_permission,
+                whyRequired=why_required,
+                approvalUrl=approval_url,
+                approver=approver,
             )
         if 200 <= response.status_code < 300:
             return ValidationCheck(
@@ -167,6 +207,10 @@ class AzureAccessClient:
                 mandatory=mandatory,
                 message="Access verified",
                 httpStatus=response.status_code,
+                requiredPermission=required_permission,
+                whyRequired=why_required,
+                approvalUrl=approval_url,
+                approver=approver,
             )
         if response.status_code in (401, 403):
             message = (
@@ -182,6 +226,10 @@ class AzureAccessClient:
             mandatory=mandatory,
             message=message,
             httpStatus=response.status_code,
+            requiredPermission=required_permission,
+            whyRequired=why_required,
+            approvalUrl=approval_url,
+            approver=approver,
         )
 
 

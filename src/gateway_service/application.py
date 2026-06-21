@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 
 import httpx
-from azure.identity import DefaultAzureCredential
+import jwt
 from fastapi import HTTPException, Request, Response
 
 from src.api.security import get_identity, subscription_scope, tenant_scope
@@ -35,9 +36,8 @@ class GatewayApplicationService:
         self.app = app
         app.state.rate_windows = getattr(app.state, "rate_windows", defaultdict(deque))
         app.state.breakers = getattr(app.state, "breakers", defaultdict(CircuitBreaker))
-        app.state.service_credential = getattr(
-            app.state, "service_credential", DefaultAzureCredential()
-        )
+        if not hasattr(app.state, "service_credential"):
+            app.state.service_credential = None
 
     def rate_limit(self, request: Request, subject: str) -> None:
         now = time.monotonic()
@@ -63,6 +63,38 @@ class GatewayApplicationService:
         for cookie in upstream.headers.get_list("set-cookie"):
             response.headers.append("Set-Cookie", cookie)
         return response
+
+    def internal_authorization_header(self, request: Request) -> str:
+        settings = request.app.state.settings
+        if not settings.entra_auth_enabled:
+            return ""
+        if not settings.use_managed_identity:
+            now = datetime.now(timezone.utc)
+            token = jwt.encode(
+                {
+                    "iss": "azure-cost-advisor",
+                    "aud": settings.internal_api_audience,
+                    "iat": now,
+                    "exp": now + timedelta(hours=1),
+                },
+                settings.api_session_secret,
+                algorithm="HS256",
+            )
+            return f"Bearer {token}"
+
+        if request.app.state.service_credential is None:
+            from azure.identity import DefaultAzureCredential
+
+            request.app.state.service_credential = DefaultAzureCredential()
+        scope = settings.internal_api_audience.rstrip("/") + "/.default"
+        try:
+            service_token = request.app.state.service_credential.get_token(scope)
+            return f"Bearer {service_token.token}"
+        except Exception as e:
+            import logging
+
+            logging.getLogger("finops.api.audit").error(f"Failed to get token: {e}")
+            raise HTTPException(500, f"Token error: {e}") from e
 
     async def proxy(self, path: str, request: Request):
         root = path.split("/", 1)[0]
@@ -98,17 +130,7 @@ class GatewayApplicationService:
             if cookie := request.headers.get("Cookie"):
                 headers["Cookie"] = cookie
         elif request.app.state.settings.entra_auth_enabled:
-            scope = (
-                request.app.state.settings.internal_api_audience.rstrip("/")
-                + "/.default"
-            )
-            try:
-                service_token = request.app.state.service_credential.get_token(scope)
-                headers["Authorization"] = f"Bearer {service_token.token}"
-            except Exception as e:
-                import logging
-                logging.getLogger("finops.api.audit").error(f"Failed to get token: {e}")
-                raise HTTPException(500, f"Token error: {e}")
+            headers["Authorization"] = self.internal_authorization_header(request)
         body = await request.body()
 
         async def send():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -32,6 +33,7 @@ def _seed(storage, tenant_id: str, subscription_id: str, source_tenant: str):
 
 def test_customer_credential_uses_subscription_authority_tenant(test_settings):
     test_settings.auth_mode = "entra"
+    test_settings.use_managed_identity = True
     test_settings.collection_entra_client_id = "collection-app"
     storage = create_storage_provider(test_settings)
     _seed(storage, "platform-tenant-a", "subscription-a", "customer-directory-a")
@@ -56,6 +58,7 @@ def test_customer_credential_uses_subscription_authority_tenant(test_settings):
 
 def test_customer_credential_rejects_cross_tenant_subscription(test_settings):
     test_settings.auth_mode = "entra"
+    test_settings.use_managed_identity = True
     test_settings.collection_entra_client_id = "collection-app"
     storage = create_storage_provider(test_settings)
     _seed(storage, "tenant-a", "subscription-a", "tenant-a")
@@ -80,6 +83,77 @@ def test_missing_collection_app_configuration_fails_closed(test_settings):
             test_settings,
             storage,
         ).for_subscription("tenant-a", "subscription-a")
+
+
+def test_local_docker_compose_uses_client_secret_credential(test_settings, monkeypatch):
+    test_settings.auth_mode = "entra"
+    test_settings.use_managed_identity = False
+    test_settings.collection_entra_client_id = "collection-app"
+    test_settings.azure_client_id = "local-client"
+    test_settings.azure_client_secret = "local-secret"
+    storage = create_storage_provider(test_settings)
+    _seed(storage, "tenant-a", "subscription-a", "customer-directory-a")
+    calls = []
+
+    class _ClientSecretCredential:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "azure.identity",
+        SimpleNamespace(ClientSecretCredential=_ClientSecretCredential),
+    )
+
+    credential = CustomerTenantCredentialFactory(
+        test_settings,
+        storage,
+        assertion_provider=lambda: "should-not-be-read",
+    ).for_subscription("tenant-a", "subscription-a")
+
+    assert isinstance(credential, _ClientSecretCredential)
+    assert calls == [
+        {
+            "tenant_id": "customer-directory-a",
+            "client_id": "local-client",
+            "client_secret": "local-secret",
+        }
+    ]
+
+
+def test_local_docker_compose_uses_default_azure_credential_without_workload_identity(
+    test_settings, monkeypatch
+):
+    test_settings.auth_mode = "entra"
+    test_settings.use_managed_identity = False
+    test_settings.collection_entra_client_id = "collection-app"
+    storage = create_storage_provider(test_settings)
+    _seed(storage, "tenant-a", "subscription-a", "customer-directory-a")
+    calls = []
+
+    class _DefaultAzureCredential:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "azure.identity",
+        SimpleNamespace(DefaultAzureCredential=_DefaultAzureCredential),
+    )
+
+    credential = CustomerTenantCredentialFactory(
+        test_settings,
+        storage,
+        assertion_provider=lambda: "should-not-be-read",
+    ).for_subscription("tenant-a", "subscription-a")
+
+    assert isinstance(credential, _DefaultAzureCredential)
+    assert calls == [
+        {
+            "exclude_workload_identity_credential": True,
+            "exclude_managed_identity_credential": True,
+        }
+    ]
 
 
 def test_scheduled_collection_uses_distinct_customer_credentials(

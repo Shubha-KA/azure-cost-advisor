@@ -129,7 +129,7 @@ def create_app(
         yield
 
     app = FastAPI(
-        title="Azure Cost Advisor API",
+        title="FinsOpsIQ API",
         version="1.0.0",
         lifespan=lifespan,
     )

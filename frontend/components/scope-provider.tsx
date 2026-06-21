@@ -29,7 +29,7 @@ export function ScopeProvider({ children }: { children: React.ReactNode }) {
     subscriptionId: "",
   });
   const pathname = usePathname();
-  const isPublicPage = pathname === "/login";
+  const isPublicPage = pathname === "/" || pathname === "/login";
 
   useEffect(() => {
     if (isPublicPage) return;

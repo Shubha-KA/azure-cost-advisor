@@ -14,7 +14,8 @@ from src.dashboard.data_loader import DashboardDataLoader
 from src.processor.anomaly_detector import AnomalyDetector
 from src.processor.normalizer import DataNormalizer, ProcessorError
 from src.processor.report_generator import ReportGenerator
-from src.processor.run import _reconcile_costs, run_processing
+from src.domain.context import OperationContext
+from src.processor.run import _reconcile_costs, _resource_fact_document, run_processing
 from src.processor.savings_estimator import SavingsEstimator
 from src.processor.schemas import CANONICAL_COLUMNS, COST_FACT_COLUMNS
 from src.processor.waste_detector import WasteDetector
@@ -84,6 +85,43 @@ def test_idle_public_ip_rule(test_settings: Settings, seeded_raw_data: Path) -> 
     ips = df[(df["resource_type"] == "Public IP Address") & (df["attached"] == False)]  # noqa: E712
     assert len(ips) >= 1
     assert (ips["recommendation"] == "Delete Public IP").all()
+
+
+def test_resource_fact_attributes_only_include_utilization_for_compute() -> None:
+    context = OperationContext.create("tenant-a", "subscription-a")
+    public_ip = _resource_fact_document(
+        {
+            "resource_id": "/subscriptions/a/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-a",
+            "resource_name": "pip-a",
+            "resource_type": "Public IP Address",
+            "resource_group": "rg",
+            "cpu_avg_percent": 0.0,
+            "memory_avg_percent": 0.0,
+            "node_utilization": None,
+            "source_system": "Azure Resource Graph",
+            "source_timestamp": "2026-06-01T00:00:00Z",
+        },
+        context,
+    )
+    vm = _resource_fact_document(
+        {
+            "resource_id": "/subscriptions/a/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-a",
+            "resource_name": "vm-a",
+            "resource_type": "Virtual Machine",
+            "resource_group": "rg",
+            "cpu_avg_percent": 2.0,
+            "memory_avg_percent": 12.0,
+            "node_utilization": None,
+            "source_system": "Azure Monitor",
+            "source_timestamp": "2026-06-01T00:00:00Z",
+        },
+        context,
+    )
+
+    assert "cpu_avg_percent" not in public_ip["attributes"]
+    assert "memory_avg_percent" not in public_ip["attributes"]
+    assert vm["attributes"]["cpu_avg_percent"] == 2.0
+    assert vm["attributes"]["memory_avg_percent"] == 12.0
 
 
 def test_aks_waste_rule(test_settings: Settings, seeded_raw_data: Path) -> None:

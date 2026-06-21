@@ -73,3 +73,8 @@ def discover_subscriptions(request: Request):
 @app.post("/api/onboarding/subscriptions/select")
 async def select_subscriptions(request: Request, body: dict = Body(...)):
     return await app.state.application.select_subscriptions(request, body)
+
+
+@app.post("/api/onboarding/collection/retry")
+async def retry_collection(request: Request):
+    return await app.state.application.retry_collection(request)

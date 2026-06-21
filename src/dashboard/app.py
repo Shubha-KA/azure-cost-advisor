@@ -37,7 +37,7 @@ st.set_page_config(
 def render_sidebar(settings, auth_session=None) -> None:
     with st.sidebar:
         st.markdown("## ☁️")
-        st.title("Cost Advisor")
+        st.title("FinsOpsIQ")
         st.caption("AI-Powered Azure FinOps")
 
         st.divider()

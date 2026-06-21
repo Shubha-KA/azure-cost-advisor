@@ -134,6 +134,7 @@ class Settings(BaseSettings):
     azure_openai_embedding_deployment: str = Field(
         default="text-embedding-3-small", alias="AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
     )
+    ai_debug_mode: bool = Field(default=False, alias="AI_DEBUG_MODE")
     search_provider: str = Field(
         default="azure_ai_search", alias="SEARCH_PROVIDER"
     )

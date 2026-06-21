@@ -27,6 +27,29 @@ RESOURCE_TYPES = {
     "gateway": "microsoft.network/applicationgateways",
 }
 
+AZURE_LOCATION_ALIASES = {
+    "east us": "eastus",
+    "eastus": "eastus",
+    "east us 2": "eastus2",
+    "eastus2": "eastus2",
+    "west us": "westus",
+    "westus": "westus",
+    "west us 2": "westus2",
+    "westus2": "westus2",
+    "central us": "centralus",
+    "centralus": "centralus",
+    "north europe": "northeurope",
+    "northeurope": "northeurope",
+    "west europe": "westeurope",
+    "westeurope": "westeurope",
+    "south india": "southindia",
+    "southindia": "southindia",
+    "central india": "centralindia",
+    "centralindia": "centralindia",
+    "west india": "westindia",
+    "westindia": "westindia",
+}
+
 
 def inventory_intent(question: str) -> str:
     q = question.lower()
@@ -48,6 +71,16 @@ def inventory_intent(question: str) -> str:
     if any(term in q for term in ("resource", "inventory", "what is deployed")):
         return "all"
     raise InventoryQueryError("Question is not a supported inventory query")
+
+
+def location_filter(question: str) -> str:
+    q = question.lower()
+    for term, location in sorted(
+        AZURE_LOCATION_ALIASES.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if term in q:
+            return f" | where location =~ '{location}' "
+    return " "
 
 
 def is_inventory_question(question: str) -> bool:
@@ -89,21 +122,25 @@ class ResourceGraphInventoryService:
 
     def query(self, question: str) -> dict[str, Any]:
         intent = inventory_intent(question)
+        location_clause = location_filter(question)
         if intent == "resource_group":
             kql = (
                 "ResourceContainers "
                 "| where type =~ 'microsoft.resources/subscriptions/resourcegroups' "
+                f"{location_clause}"
                 "| project name, type, resourceGroup=name, location "
                 "| order by name asc"
             )
         elif intent == "all":
             kql = (
-                "Resources | project name, type, resourceGroup, location, id "
+                f"Resources {location_clause}"
+                "| project name, type, resourceGroup, location, id "
                 "| order by type asc, name asc | limit 200"
             )
         else:
             kql = (
                 f"Resources | where type =~ '{RESOURCE_TYPES[intent]}' "
+                f"{location_clause}"
                 "| project name, type, resourceGroup, location, id "
                 "| order by name asc | limit 200"
             )

@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
 from src.repositories.errors import StorageConfigurationError, TenantScopeError
 
+logger = logging.getLogger(__name__)
+
 
 class CustomerTenantCredentialFactory:
     """Create an ARM credential scoped to a customer's Entra tenant.
 
-    In AKS, the projected workload identity token is used as a client assertion
-    for the platform's multi-tenant collection application. Customer Azure RBAC
-    assignments then authorize that service principal at subscription scope.
+    Collection credentials are runtime-aware:
+
+    * AKS / managed identity mode uses a projected workload identity token as a
+      client assertion for the platform's multi-tenant collection application.
+    * Local Docker Compose mode does not use workload identity. It uses either a
+      configured service principal secret or DefaultAzureCredential, which can
+      include Azure CLI / developer credentials.
     """
 
     def __init__(
@@ -55,6 +62,9 @@ class CustomerTenantCredentialFactory:
                 "COLLECTION_ENTRA_CLIENT_ID is required for cross-tenant collection"
             )
 
+        if not self._use_workload_identity():
+            return self._local_credential(authority_tenant_id)
+
         cache_key = (authority_tenant_id, client_id)
         if cache_key not in self._credentials:
             builder = self.credential_builder
@@ -62,10 +72,58 @@ class CustomerTenantCredentialFactory:
                 from azure.identity import ClientAssertionCredential
 
                 builder = ClientAssertionCredential
+            logger.info(
+                "collection_credential_strategy strategy=workload_identity tenant_id=%s client_id=%s",
+                authority_tenant_id,
+                client_id,
+            )
             self._credentials[cache_key] = builder(
                 tenant_id=authority_tenant_id,
                 client_id=client_id,
                 func=self.assertion_provider,
+            )
+        return self._credentials[cache_key]
+
+    def _use_workload_identity(self) -> bool:
+        return bool(self.settings.use_managed_identity)
+
+    def _local_credential(self, authority_tenant_id: str):
+        """Return a non-workload-identity credential for local Docker Compose.
+
+        Prefer an explicit client secret when present because it is deterministic
+        in containers. Otherwise use DefaultAzureCredential with workload and
+        managed identity legs excluded so local runs never accidentally take the
+        AKS code path.
+        """
+
+        if self.settings.azure_client_id and self.settings.azure_client_secret:
+            cache_key = (authority_tenant_id, self.settings.azure_client_id, "client_secret")
+            if cache_key not in self._credentials:
+                from azure.identity import ClientSecretCredential
+
+                logger.info(
+                    "collection_credential_strategy strategy=client_secret tenant_id=%s client_id=%s",
+                    authority_tenant_id,
+                    self.settings.azure_client_id,
+                )
+                self._credentials[cache_key] = ClientSecretCredential(
+                    tenant_id=authority_tenant_id,
+                    client_id=self.settings.azure_client_id,
+                    client_secret=self.settings.azure_client_secret,
+                )
+            return self._credentials[cache_key]
+
+        cache_key = (authority_tenant_id, "default", "local")
+        if cache_key not in self._credentials:
+            from azure.identity import DefaultAzureCredential
+
+            logger.info(
+                "collection_credential_strategy strategy=default_azure_credential tenant_id=%s",
+                authority_tenant_id,
+            )
+            self._credentials[cache_key] = DefaultAzureCredential(
+                exclude_workload_identity_credential=True,
+                exclude_managed_identity_credential=True,
             )
         return self._credentials[cache_key]
 

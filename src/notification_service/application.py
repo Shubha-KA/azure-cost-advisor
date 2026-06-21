@@ -31,7 +31,7 @@ class NotificationApplicationService:
                     "senderAddress": settings.email_sender,
                     "recipients": {"to": [{"address": recipient}]},
                     "content": {
-                        "subject": f"Azure Cost Advisor: {event.event_type.value}",
+                        "subject": f"FinsOpsIQ: {event.event_type.value}",
                         "plainText": str(event.payload),
                     },
                 }

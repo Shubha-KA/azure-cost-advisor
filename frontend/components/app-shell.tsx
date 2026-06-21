@@ -30,8 +30,8 @@ const links = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  // Bypass the app shell for standalone pages (login, onboarding)
-  if (pathname === "/login") {
+  // Bypass the app shell for standalone public/auth pages.
+  if (pathname === "/" || pathname === "/login") {
     return <>{children}</>;
   }
 
@@ -48,7 +48,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <aside className="fixed inset-y-0 hidden w-64 border-r bg-card p-5 lg:block">
-        <div className="mb-8 text-lg font-semibold">Azure Cost Advisor</div>
+        <div className="mb-8 text-lg font-semibold">FinsOpsIQ</div>
         <nav className="space-y-1">
           {links.map(([href, label, Icon]) => (
             <Link
@@ -120,4 +120,3 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-

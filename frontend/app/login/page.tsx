@@ -57,7 +57,7 @@ export default function LoginPage() {
               </svg>
             </div>
             <h1 className="bg-gradient-to-r from-white to-blue-200 bg-clip-text text-2xl font-bold tracking-tight text-transparent">
-              Azure Cost Advisor
+              FinsOpsIQ
             </h1>
             <p className="mt-2 text-sm text-slate-400">
               Multi-tenant FinOps intelligence for Azure

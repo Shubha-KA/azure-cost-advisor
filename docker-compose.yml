@@ -8,7 +8,6 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - docker-compose.env
       - .env
     environment:
       AUTH_SERVICE_URL: "http://auth-service:8000"
@@ -35,7 +34,6 @@ services:
       args:
         SERVICE_MODULE: "src.microservices.auth_service"
     env_file:
-      - docker-compose.env
       - .env
     environment:
       COLLECTION_SERVICE_URL: "http://collection-service:8000"
@@ -52,7 +50,6 @@ services:
       args:
         SERVICE_MODULE: "src.microservices.collection_service"
     env_file:
-      - docker-compose.env
       - .env
     environment:
       PROCESSING_SERVICE_URL: "http://processing-service:8000"
@@ -66,7 +63,6 @@ services:
       args:
         SERVICE_MODULE: "src.microservices.processing_service"
     env_file:
-      - docker-compose.env
       - .env
     environment:
       USE_MANAGED_IDENTITY: "false"
@@ -79,7 +75,6 @@ services:
       args:
         SERVICE_MODULE: "src.microservices.ai_service"
     env_file:
-      - docker-compose.env
       - .env
     environment:
       USE_MANAGED_IDENTITY: "false"
@@ -92,7 +87,6 @@ services:
       args:
         SERVICE_MODULE: "src.microservices.notification_service"
     env_file:
-      - docker-compose.env
       - .env
     environment:
       USE_MANAGED_IDENTITY: "false"

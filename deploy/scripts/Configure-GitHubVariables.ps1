@@ -2,8 +2,10 @@ param(
     [string]$Repository = "Shubha-KA/azure-cost-advisor",
     [Parameter(Mandatory = $true)]
     [string]$AzureClientId,
-    [string]$AzureTenantId = "22dc2419-3ab3-4f27-905a-945315d19d95",
-    [string]$AzureSubscriptionId = "e54a7ca3-4b6b-4b0f-889d-2508c85f4f30",
+    [Parameter(Mandatory = $true)]
+    [string]$AzureTenantId,
+    [Parameter(Mandatory = $true)]
+    [string]$AzureSubscriptionId,
     [string]$StateResourceGroup = "",
     [string]$StateStorageAccount = ""
 )

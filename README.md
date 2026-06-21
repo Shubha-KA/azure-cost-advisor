@@ -181,25 +181,13 @@ To deploy the entire networking topology, Application Gateway, and containerized
 
 ---
 
-## 6. CI/CD Pipelines (Azure DevOps)
+## 6. CI/CD Pipelines (GitHub Actions)
 
-The application includes two decoupled YAML pipeline configurations inside the [pipelines/](file:///c:/Users/shubh/OneDrive/Desktop/AI-Cost-Optimizer/azure-cost-advisor/pipelines) directory:
+The active CI/CD entry points are:
 
-### CI Build Pipeline ([build.yml](file:///c:/Users/shubh/OneDrive/Desktop/AI-Cost-Optimizer/azure-cost-advisor/pipelines/build.yml))
-- **Triggers**: Automatically runs on every merge or direct commit to the `main` branch.
-- **Actions**:
-  1. Installs Python 3.11 and upgrades `pip`.
-  2. Installs requirements listed in `requirements.txt`.
-  3. Executes the full `pytest` suite, producing a JUnit test results report and detailed code coverage files.
-  4. Publishes test results and coverage data directly to the Azure DevOps build run dashboard.
-  5. Compiles and tags the Docker image with the dynamic `BuildId`.
-  6. Pushes the Docker image to the Azure Container Registry (ACR) service connection (`cost-advisor-acr-service-connection`).
+- `.github/workflows/application-ci.yml`
+- `.github/workflows/platform-deploy.yml`
 
-### CD Deploy Pipeline ([deploy.yml](file:///c:/Users/shubh/OneDrive/Desktop/AI-Cost-Optimizer/azure-cost-advisor/pipelines/deploy.yml))
-- **Triggers**: Automatically triggers upon a successful execution run of the `build.yml` pipeline.
-- **Actions**:
-  1. Installs the specific version of Terraform.
-  2. Authenticates securely against Azure RM via the configured service connection (`azure-cost-advisor-service-connection`).
-  3. Performs `terraform init` and compiles a dry-run `terraform plan`, generating an immutable plan file (`tfplan`) using the newly compiled Docker image tag.
-  4. Runs `terraform apply` to safely provision and deploy changes to the Resource Group, VNets, and Container Runtime.
-  5. Executes a secure CLI validation step checking the Application Gateway's backend pools and confirming appropriate private routing across peered subnets.
+`application-ci.yml` validates the application, builds service images, and pushes them to Azure Container Registry.
+
+`platform-deploy.yml` provisions and updates Azure infrastructure through Terraform using GitHub OIDC authentication.

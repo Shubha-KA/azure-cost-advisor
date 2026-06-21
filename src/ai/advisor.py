@@ -11,12 +11,14 @@ from typing import Any
 import pandas as pd
 
 from src.ai.inventory import ResourceGraphInventoryService
+from src.ai.prompts import FINOPS_RECOMMENDATION_ANALYSIS_PROMPT
 from src.ai.rag import RAGError, RAGPipeline
-from src.ai.router import route_query
+from src.ai.router import classify_intent
 from src.config import Settings, get_settings
 from src.domain.context import OperationContext
 from src.domain.models import Recommendation
 from src.money import format_money, format_money_totals
+from src.repositories.errors import StorageConfigurationError
 from src.storage.factory import create_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,14 @@ class FinOpsAdvisor:
             for subscription_id in self.subscription_ids
         )
 
+    def _with_debug(self, answer: str, debug_lines: list[str]) -> str:
+        if not self.settings.ai_debug_mode:
+            return answer
+        clean_debug = [line for line in debug_lines if line]
+        if not clean_debug:
+            return answer
+        return "\n".join([answer.rstrip(), "", "Debug Details", *clean_debug])
+
     def ask(self, question: str, chat_history: str = "") -> str:
         """Answer a FinOps question using RAG, live Azure inventory, or rule‑based fallback.
 
@@ -76,20 +86,34 @@ class FinOpsAdvisor:
         rule‑based response.
         """
         # 1️⃣ Detect inventory‑type questions that should query Azure live via Resource Graph.
-        route = route_query(question)
+        classification = classify_intent(question)
+        route = classification.route
         if route == "live_inventory":
             try:
                 return self._handle_live_inventory(question)
             except Exception as exc:
                 logger.warning("Live inventory lookup failed: %s", exc)
-                return (
-                    "Live Azure inventory query failed.\n\n"
-                    "Source: Azure Resource Graph (LIVE)\n"
-                    f"Subscription scope: {', '.join(self.subscription_ids)}\n"
-                    f"Error: {exc}"
+                return self._with_debug(
+                    "I could not retrieve the deployed resource inventory right now. "
+                    "Please try again, or refresh the subscription connection.",
+                    [
+                        "Live Azure inventory query failed",
+                        "Source: Azure Resource Graph (LIVE)",
+                        f"Subscription scope: {', '.join(self.subscription_ids)}",
+                        f"Error: {exc}",
+                    ],
                 )
 
         # 2️⃣ If Azure OpenAI is configured, use the RAG pipeline (FAISS index).
+        if route == "cost_analysis":
+            return self._answer_cost_analysis(question, classification)
+
+        if route == "recommendation":
+            return self._answer_recommendation_query(question, classification)
+
+        if route == "utilization":
+            return self._answer_utilization_query(question, classification)
+
         if self.settings.openai_configured:
             try:
                 result = self.rag.invoke(
@@ -100,7 +124,7 @@ class FinOpsAdvisor:
                     operation=route,
                 )
                 return result.get("answer", self._rule_based_answer(question))
-            except RAGError as exc:
+            except (RAGError, StorageConfigurationError) as exc:
                 logger.warning("RAG failed, using rule‑based fallback: %s", exc)
 
         # 3️⃣ Default: rule‑based responses using processed CSV data.
@@ -137,6 +161,17 @@ class FinOpsAdvisor:
         resources_path = processed / "resources_latest.csv"
         if resources_path.exists():
             context["resources"] = pd.read_csv(resources_path)
+        else:
+            rows = []
+            for subscription_id in self.subscription_ids:
+                rows.extend(
+                    item.model_dump(mode="json")
+                    for item in self.storage.resources.list_latest(
+                        self.tenant_id, subscription_id
+                    )
+                )
+            if rows:
+                context["resources"] = pd.DataFrame(rows)
 
         for key, filename in [
             ("waste", "waste_findings_latest.json"),
@@ -146,6 +181,35 @@ class FinOpsAdvisor:
             path = processed / filename
             if path.exists():
                 context[key] = json.loads(path.read_text(encoding="utf-8"))
+
+        if "summary" not in context:
+            for subscription_id in self.subscription_ids:
+                metadata = self.storage.processing_metadata.list_latest(
+                    self.tenant_id, subscription_id
+                )
+                processing = next(
+                    (
+                        item
+                        for item in metadata
+                        if item.get("metadataType") == "processingRun"
+                        and item.get("summary")
+                    ),
+                    None,
+                )
+                if processing:
+                    context["summary"] = processing["summary"]
+                    break
+
+        recommendations = []
+        for subscription_id in self.subscription_ids:
+            recommendations.extend(
+                item.model_dump(mode="json")
+                for item in self.storage.recommendations.list_latest(
+                    self.tenant_id, subscription_id
+                )
+            )
+        if recommendations:
+            context["recommendations"] = recommendations
 
         return context
 
@@ -158,13 +222,7 @@ class FinOpsAdvisor:
         ).query(question)
         rows = result["records"]
         lines = [
-            f"Live Azure inventory: {len(rows)} result(s).",
-            "",
-            f"Source: {result['source_system']} (LIVE)",
-            f"Timestamp: {result['timestamp']}",
-            f"Subscription scope: {', '.join(result['subscription_scope'])}",
-            f"Result count: {result['result_count']}",
-            f"Collection run: {result['collection_run_id']}",
+            "Deployed Resources",
             "",
         ]
         if not rows:
@@ -176,7 +234,725 @@ class FinOpsAdvisor:
             )
         if len(rows) > 50:
             lines.append(f"- ... {len(rows) - 50} additional results omitted")
-        return "\n".join(lines)
+        return self._with_debug(
+            "\n".join(lines),
+            [
+                f"Source: {result['source_system']} (LIVE)",
+                f"Timestamp: {result['timestamp']}",
+                f"Subscription scope: {', '.join(result['subscription_scope'])}",
+                f"Result count: {result['result_count']}",
+                f"Collection run: {result['collection_run_id']}",
+            ],
+        )
+
+    def _load_repository_context(self) -> dict[str, list[dict[str, Any]]]:
+        context: dict[str, list[dict[str, Any]]] = {
+            "costFacts": [],
+            "resources": [],
+            "recommendations": [],
+            "advisorFindings": [],
+        }
+        for subscription_id in self.subscription_ids:
+            context["costFacts"].extend(
+                item.model_dump(mode="json")
+                for item in self.storage.cost_facts.list_latest(
+                    self.tenant_id, subscription_id
+                )
+            )
+            context["resources"].extend(
+                item.model_dump(mode="json")
+                for item in self.storage.resources.list_latest(
+                    self.tenant_id, subscription_id
+                )
+            )
+            context["recommendations"].extend(
+                item.model_dump(mode="json")
+                for item in self.storage.recommendations.list_latest(
+                    self.tenant_id, subscription_id
+                )
+            )
+            advisor_payload = self.storage.raw_payloads.load_latest(
+                self.tenant_id, subscription_id, "advisor"
+            )
+            if advisor_payload:
+                context["advisorFindings"].extend(
+                    advisor_payload.get("recommendations", [])
+                )
+        return context
+
+    def _answer_cost_analysis(self, question: str, classification: Any) -> str:
+        context = self._load_repository_context()
+        facts = context["costFacts"]
+        resources = context["resources"]
+        recommendations = context["recommendations"]
+
+        if not facts:
+            return self._with_debug(
+                "Cost analysis could not run because no costFacts are available for "
+                "the selected subscription.",
+                [
+                    f"Detected intent: {classification.intent}",
+                    "Route selected: cost_analysis",
+                    "Retrieval source: costFacts repository",
+                ],
+            )
+
+        resources_by_id = {
+            self._normalize_resource_id(item.get("resource_id") or item.get("resourceId")): item
+            for item in resources
+            if item.get("resource_id") or item.get("resourceId")
+        }
+        recommendations_by_id: dict[str, list[dict[str, Any]]] = {}
+        for item in recommendations:
+            resource_id = self._normalize_resource_id(
+                item.get("resource_id") or item.get("resourceId")
+            )
+            if resource_id:
+                recommendations_by_id.setdefault(resource_id, []).append(item)
+
+        totals: dict[tuple[str, str], dict[str, Any]] = {}
+        for fact in facts:
+            resource_id = self._normalize_resource_id(
+                fact.get("resource_id") or fact.get("resourceId")
+            )
+            currency = str(fact.get("currency") or "").upper()
+            key = (resource_id or "(unallocated)", currency)
+            current = totals.setdefault(
+                key,
+                {
+                    "resource_id": resource_id or "(unallocated)",
+                    "currency": currency,
+                    "cost": 0.0,
+                    "records": 0,
+                    "services": set(),
+                    "resource_group": fact.get("resource_group")
+                    or fact.get("resourceGroup")
+                    or "",
+                },
+            )
+            current["cost"] += float(fact.get("cost_amount") or fact.get("costAmount") or 0)
+            current["records"] += 1
+            service = fact.get("service_name") or fact.get("serviceName")
+            if service:
+                current["services"].add(service)
+
+        ranked = sorted(totals.values(), key=lambda item: item["cost"], reverse=True)
+        top_n = self._requested_top_n(question)
+        q = question.lower()
+
+        lines = [
+            "Top Cost Drivers",
+            "",
+        ]
+
+        if "node pool" in q or "nodepool" in q:
+            node_pool_rows = [
+                item
+                for item in ranked
+                if "nodepool" in item["resource_id"]
+                or "node pool" in " ".join(item["services"]).lower()
+                or "nodepool" in " ".join(item["services"]).lower()
+            ]
+            if node_pool_rows:
+                ranked = node_pool_rows
+            else:
+                lines.extend(
+                    [
+                        "I do not see node-pool-level costFacts in the collected data. "
+                        "Azure Cost Management usually reports AKS at cluster/resource levels unless node pool tags or allocation dimensions are collected.",
+                        "",
+                        "Closest available AKS/resource-level costs:",
+                    ]
+                )
+
+        if top_n == 1 and ranked:
+            top = ranked[0]
+            lines.append(
+                f"The highest-cost resource is {self._cost_resource_label(top, resources_by_id)} "
+                f"at {format_money(top['cost'], top['currency'])}."
+            )
+            lines.append("")
+            lines.append("Cost Breakdown:")
+        else:
+            lines.append(f"Top {min(top_n, len(ranked))} resources by spend:")
+
+        for index, item in enumerate(ranked[:top_n], 1):
+            resource = resources_by_id.get(item["resource_id"], {})
+            recs = recommendations_by_id.get(item["resource_id"], [])
+            recommendation = ""
+            if recs:
+                action = recs[0].get("content") or "optimization opportunity identified"
+                recommendation = f" | recommended action: {action}"
+            services = ", ".join(sorted(item["services"])) or "unknown service"
+            lines.append(
+                f"{index}. {self._cost_resource_label(item, resources_by_id)} - "
+                f"{format_money(item['cost'], item['currency'])} "
+                f"({services}; resource group: {resource.get('resource_group') or item.get('resource_group') or 'unknown'})"
+                f"{recommendation}"
+            )
+
+        return self._with_debug(
+            "\n".join(lines),
+            [
+                f"Detected intent: {classification.intent}",
+                "Route selected: cost_analysis",
+                "Retrieval source: costFacts + resource inventory + recommendations repositories",
+                f"Cost records analyzed: {len(facts)}",
+                f"Resources correlated: {sum(1 for item in ranked if item['resource_id'] in resources_by_id)}",
+            ],
+        )
+
+    def _answer_recommendation_query(self, question: str, classification: Any) -> str:
+        context = self._load_repository_context()
+        ctx = self._load_context()
+        resources = pd.DataFrame(context["resources"])
+        if resources.empty:
+            resources = ctx.get("resources", pd.DataFrame())
+        analysis = self._build_recommendation_analysis(context, resources)
+
+        if analysis["opportunities"]:
+            llm_answer = self._try_generate_recommendation_narrative(
+                question, classification, analysis
+            )
+            if llm_answer:
+                return llm_answer
+            return self._format_recommendation_analysis(classification, analysis)
+
+        if not resources.empty:
+            return self._answer_savings_opportunities(resources, ctx.get("waste", {}))
+
+        return self._with_debug(
+            "Optimization analysis could not run because no recommendation, "
+            "resource, or waste finding data is available yet.",
+            [
+                f"Detected intent: {classification.intent}",
+                "Route selected: recommendation",
+                "Retrieval source: recommendations + resource inventory + costFacts repositories",
+            ],
+        )
+
+    def _build_recommendation_analysis(
+        self, context: dict[str, list[dict[str, Any]]], resources: pd.DataFrame
+    ) -> dict[str, Any]:
+        facts = context["costFacts"]
+        recommendations = context["recommendations"]
+        advisor_findings = context.get("advisorFindings", [])
+        resources_list = context["resources"]
+        resources_by_id = self._resources_by_id(resources_list)
+        costs_by_id = self._cost_totals_by_resource(facts)
+
+        top_spend_categories = self._top_spend_categories(facts)
+        top_cost_resources = self._top_cost_resources(costs_by_id, resources_by_id)
+        opportunities = sorted(
+            self._correlate_recommendations(
+                recommendations, resources_by_id, costs_by_id
+            ),
+            key=lambda item: (item["savings"], item["cost"]),
+            reverse=True,
+        )
+        for opportunity in opportunities:
+            opportunity["priority"] = self._priority_for_opportunity(opportunity)
+            opportunity["root_cause"] = self._root_cause_for_opportunity(opportunity)
+            opportunity["advisor_evidence"] = self._advisor_evidence_for_resource(
+                opportunity["resource_id"], advisor_findings
+            )
+            opportunity["utilization"] = self._utilization_summary(
+                resources_by_id.get(opportunity["resource_id"], {})
+            )
+
+        savings_totals: dict[str, float] = {}
+        for opportunity in opportunities:
+            currency = opportunity["savings_currency"] or "UNKNOWN"
+            savings_totals[currency] = round(
+                savings_totals.get(currency, 0.0) + opportunity["savings"], 2
+            )
+
+        return {
+            "source": "costFacts + resource inventory + recommendations + Azure Advisor",
+            "record_counts": {
+                "costFacts": len(facts),
+                "resources": len(resources_list) or int(len(resources)),
+                "recommendations": len(recommendations),
+                "advisorFindings": len(advisor_findings),
+            },
+            "top_spend_categories": top_spend_categories,
+            "top_cost_resources": top_cost_resources,
+            "opportunities": opportunities[:10],
+            "estimated_savings_totals": savings_totals,
+            "root_causes": self._summarize_root_causes(opportunities),
+        }
+
+    def _try_generate_recommendation_narrative(
+        self, question: str, classification: Any, analysis: dict[str, Any]
+    ) -> str | None:
+        if not (self.settings.openai_configured or getattr(self.rag, "_llm", None) is not None):
+            return None
+        try:
+            messages = FINOPS_RECOMMENDATION_ANALYSIS_PROMPT.format_messages(
+                input=question,
+                analysis=json.dumps(analysis, indent=2, default=str),
+            )
+            response = self.rag._get_llm().invoke(messages)
+            answer = str(getattr(response, "content", response)).strip()
+            if not answer:
+                return None
+            return self._with_debug(
+                answer,
+                [
+                    f"Detected intent: {classification.intent}",
+                    "Route selected: recommendation",
+                    f"Retrieval source: {analysis['source']}",
+                ],
+            )
+        except Exception as exc:
+            logger.warning("Recommendation narrative generation failed: %s", exc)
+            return None
+
+    def _format_recommendation_analysis(
+        self, classification: Any, analysis: dict[str, Any]
+    ) -> str:
+        lines = [
+            "Executive Summary",
+            "Your best savings opportunities are concentrated in the resources with explicit waste findings and quantified recommendations.",
+            "",
+            "Top Cost Drivers",
+        ]
+        for item in analysis["top_spend_categories"][:5]:
+            lines.append(
+                f"- {item['service_name']}: {format_money(item['cost'], item['currency'])}"
+            )
+
+        lines.extend(["", "Root Causes"])
+        for cause in analysis["root_causes"][:5]:
+            lines.append(f"- {cause['cause']}: {cause['count']} finding(s)")
+
+        lines.extend(["", "Recommended Actions"])
+        for item in analysis["opportunities"][:5]:
+            cost_note = (
+                f"; observed spend {format_money(item['cost'], item['currency'])}"
+                if item["currency"]
+                else ""
+            )
+            util_note = f"; utilization {item['utilization']}" if item["utilization"] else ""
+            advisor_note = (
+                f"; Advisor: {item['advisor_evidence']}"
+                if item["advisor_evidence"]
+                else ""
+            )
+            waste_note = f"; waste level {item['waste_level']}" if item["waste_level"] else ""
+            lines.append(
+                f"- Priority {item['priority']}: {item['resource_name']} "
+                f"({item['resource_type']}) — {item['action']} — "
+                f"estimated savings {format_money(item['savings'], item['savings_currency'])}/month"
+                f"{cost_note}{util_note}{waste_note}{advisor_note}. Root cause: {item['root_cause']}."
+            )
+
+        lines.extend(["", "Estimated Monthly Savings"])
+        if analysis["estimated_savings_totals"]:
+            for currency, amount in analysis["estimated_savings_totals"].items():
+                lines.append(f"- {format_money(amount, currency)}/month")
+        else:
+            lines.append("- Savings not quantified")
+        return self._with_debug(
+            "\n".join(lines),
+            [
+                f"Detected intent: {classification.intent}",
+                "Route selected: recommendation",
+                f"Retrieval source: {analysis['source']}",
+                f"Records analyzed: {analysis['record_counts']}",
+            ],
+        )
+
+    def _answer_utilization_query(self, question: str, classification: Any) -> str:
+        context = self._load_repository_context()
+        resources = context["resources"]
+        if not resources:
+            return self._with_debug(
+                "Utilization analysis could not run because no resource inventory facts are available.",
+                [
+                    f"Detected intent: {classification.intent}",
+                    "Route selected: utilization",
+                    "Retrieval source: resource inventory/utilization attributes",
+                ],
+            )
+
+        rows = []
+        for item in resources:
+            if not self._is_utilization_resource(item):
+                continue
+            attrs = item.get("attributes") or {}
+            cpu = self._first_number(
+                item,
+                attrs,
+                "cpu_avg_percent",
+                "cpuAvgPercent",
+                "cpu_average_percent",
+                "averageCpuPercentage",
+            )
+            memory = self._first_number(
+                item,
+                attrs,
+                "memory_avg_percent",
+                "memoryAvgPercent",
+                "averageMemoryPercentage",
+            )
+            savings = float(item.get("estimated_savings") or item.get("estimatedSavings") or 0)
+            waste_level = str(item.get("waste_level") or item.get("wasteLevel") or "NONE")
+            utilization_rule = str(attrs.get("rule_id") or item.get("rule_id") or "")
+            compute_waste = utilization_rule in {"oversized_vm", "aks_waste"}
+            if cpu is not None or memory is not None or compute_waste:
+                rows.append((item, cpu, memory, savings, waste_level))
+
+        rows.sort(key=lambda row: (row[3], -(row[1] or 101)), reverse=True)
+        lines = [
+            "Underutilized Compute Resources",
+            "",
+        ]
+
+        if not rows:
+            lines.append(
+                "No utilization metrics are present in the collected resource facts yet. "
+                "Collect compute utilization metrics before ranking underutilized resources."
+            )
+            return self._with_debug(
+                "\n".join(lines),
+                [
+                    f"Detected intent: {classification.intent}",
+                    "Route selected: utilization",
+                    "Retrieval source: resource inventory utilization attributes + recommendations",
+                    f"Resources analyzed: {len(resources)}",
+                    f"Compute resources with utilization signals: {len(rows)}",
+                ],
+            )
+
+        for index, (item, cpu, memory, savings, waste_level) in enumerate(rows[:5], 1):
+            metrics = []
+            if cpu is not None:
+                metrics.append(f"CPU {cpu:.1f}%")
+            if memory is not None:
+                metrics.append(f"memory {memory:.1f}%")
+            if not metrics:
+                metrics.append(f"waste level {waste_level}")
+            lines.append(
+                f"{index}. {item.get('resource_name') or item.get('resourceName')} "
+                f"({item.get('resource_type') or item.get('resourceType')}) - "
+                f"{', '.join(metrics)} - estimated savings "
+                f"{format_money(savings, item.get('savings_currency') or item.get('savingsCurrency') or '')}/month"
+            )
+        return self._with_debug(
+            "\n".join(lines),
+            [
+                f"Detected intent: {classification.intent}",
+                "Route selected: utilization",
+                "Retrieval source: resource inventory utilization attributes + recommendations",
+                f"Resources analyzed: {len(resources)}",
+                f"Compute resources with utilization signals: {len(rows)}",
+            ],
+        )
+
+    def _top_spend_categories(
+        self, facts: list[dict[str, Any]], limit: int = 8
+    ) -> list[dict[str, Any]]:
+        totals: dict[tuple[str, str], float] = {}
+        for fact in facts:
+            service = str(
+                fact.get("service_name") or fact.get("serviceName") or "Unknown"
+            )
+            currency = str(fact.get("currency") or "").upper()
+            amount = float(fact.get("cost_amount") or fact.get("costAmount") or 0)
+            totals[(service, currency)] = totals.get((service, currency), 0.0) + amount
+        return [
+            {
+                "service_name": service,
+                "currency": currency,
+                "cost": round(cost, 2),
+            }
+            for (service, currency), cost in sorted(
+                totals.items(), key=lambda item: item[1], reverse=True
+            )[:limit]
+        ]
+
+    def _top_cost_resources(
+        self,
+        costs_by_id: dict[str, dict[str, Any]],
+        resources_by_id: dict[str, dict[str, Any]],
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for resource_id, cost in costs_by_id.items():
+            resource = resources_by_id.get(resource_id, {})
+            rows.append(
+                {
+                    "resource_id": resource_id,
+                    "resource_name": resource.get("resource_name")
+                    or resource.get("resourceName")
+                    or self._resource_name_from_id(resource_id),
+                    "resource_type": resource.get("resource_type")
+                    or resource.get("resourceType")
+                    or "resource",
+                    "resource_group": resource.get("resource_group")
+                    or resource.get("resourceGroup")
+                    or "",
+                    "cost": round(float(cost.get("cost") or 0), 2),
+                    "currency": cost.get("currency") or "",
+                }
+            )
+        return sorted(rows, key=lambda item: item["cost"], reverse=True)[:limit]
+
+    @staticmethod
+    def _priority_for_opportunity(opportunity: dict[str, Any]) -> str:
+        savings = float(opportunity.get("savings") or 0)
+        waste = str(opportunity.get("waste_level") or "").upper()
+        if savings >= 250 or waste == "HIGH":
+            return "High"
+        if savings >= 50 or waste == "MEDIUM":
+            return "Medium"
+        return "Low"
+
+    @staticmethod
+    def _root_cause_for_opportunity(opportunity: dict[str, Any]) -> str:
+        action = str(opportunity.get("action") or "").lower()
+        resource_type = str(opportunity.get("resource_type") or "").lower()
+        if "autoscaler" in action or "aks" in resource_type:
+            return "AKS capacity is underutilized relative to provisioned compute."
+        if "public ip" in action or "public ip" in resource_type:
+            return "Public IP is not associated with an active workload."
+        if "disk" in action or "disk" in resource_type:
+            return "Managed disk is unattached and still incurring storage cost."
+        if "rightsize" in action or "resize" in action:
+            return "Compute utilization is low compared with allocated capacity."
+        return str(opportunity.get("reason") or "Optimization recommendation")
+
+    def _advisor_evidence_for_resource(
+        self, resource_id: str, advisor_findings: list[dict[str, Any]]
+    ) -> str:
+        if not resource_id:
+            return ""
+        normalized = self._normalize_resource_id(resource_id)
+        for finding in advisor_findings:
+            candidate = self._normalize_resource_id(
+                finding.get("resourceId")
+                or finding.get("resource_id")
+                or finding.get("impactedValue")
+                or finding.get("id")
+            )
+            if candidate and (
+                candidate == normalized
+                or candidate in normalized
+                or normalized in candidate
+            ):
+                return str(
+                    finding.get("solution")
+                    or finding.get("problem")
+                    or finding.get("shortDescription")
+                    or finding.get("recommendationId")
+                    or ""
+                )
+        return ""
+
+    def _utilization_summary(self, resource: dict[str, Any]) -> str:
+        if not resource or not self._is_utilization_resource(resource):
+            return ""
+        attrs = resource.get("attributes") or {}
+        cpu = self._first_number(
+            resource,
+            attrs,
+            "cpu_avg_percent",
+            "cpuAvgPercent",
+            "averageCpuPercentage",
+            "node_utilization",
+            "nodeUtilization",
+        )
+        memory = self._first_number(
+            resource,
+            attrs,
+            "memory_avg_percent",
+            "memoryAvgPercent",
+            "averageMemoryPercentage",
+        )
+        metrics = []
+        if cpu is not None:
+            metrics.append(f"CPU {cpu:.1f}%")
+        if memory is not None:
+            metrics.append(f"memory {memory:.1f}%")
+        return ", ".join(metrics)
+
+    @staticmethod
+    def _summarize_root_causes(
+        opportunities: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        counts: dict[str, int] = {}
+        for opportunity in opportunities:
+            cause = str(opportunity.get("root_cause") or "Recommendation")
+            counts[cause] = counts.get(cause, 0) + 1
+        return [
+            {"cause": cause, "count": count}
+            for cause, count in sorted(
+                counts.items(), key=lambda item: item[1], reverse=True
+            )
+        ]
+
+    def _resources_by_id(
+        self, resources: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        return {
+            self._normalize_resource_id(item.get("resource_id") or item.get("resourceId")): item
+            for item in resources
+            if item.get("resource_id") or item.get("resourceId")
+        }
+
+    def _cost_totals_by_resource(
+        self, facts: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        totals: dict[str, dict[str, Any]] = {}
+        for fact in facts:
+            resource_id = self._normalize_resource_id(
+                fact.get("resource_id") or fact.get("resourceId")
+            )
+            if not resource_id:
+                continue
+            current = totals.setdefault(
+                resource_id,
+                {
+                    "cost": 0.0,
+                    "currency": str(fact.get("currency") or "").upper(),
+                    "records": 0,
+                },
+            )
+            current["cost"] += float(fact.get("cost_amount") or fact.get("costAmount") or 0)
+            current["records"] += 1
+        return totals
+
+    def _correlate_recommendations(
+        self,
+        recommendations: list[dict[str, Any]],
+        resources_by_id: dict[str, dict[str, Any]],
+        costs_by_id: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        correlated = []
+        for recommendation in recommendations:
+            resource_id = self._normalize_resource_id(
+                recommendation.get("resource_id") or recommendation.get("resourceId")
+            )
+            resource = resources_by_id.get(resource_id, {})
+            cost = costs_by_id.get(resource_id, {})
+            resource_name = (
+                resource.get("resource_name")
+                or resource.get("resourceName")
+                or self._resource_name_from_id(resource_id)
+            )
+            resource_type = (
+                resource.get("resource_type")
+                or resource.get("resourceType")
+                or "resource"
+            )
+            action = (
+                recommendation.get("content")
+                or recommendation.get("title")
+                or "Review optimization recommendation"
+            ).strip()
+            correlated.append(
+                {
+                    "resource_id": resource_id,
+                    "resource_name": resource_name,
+                    "resource_type": resource_type,
+                    "action": action,
+                    "reason": self._recommendation_reason(recommendation, resource),
+                    "waste_level": (
+                        (recommendation.get("evidence") or {}).get("wasteLevel")
+                        or resource.get("waste_level")
+                        or resource.get("wasteLevel")
+                        or ""
+                    ),
+                    "savings": float(
+                        recommendation.get("estimated_savings")
+                        or recommendation.get("estimatedSavings")
+                        or 0
+                    ),
+                    "savings_currency": recommendation.get("currency") or "",
+                    "cost": float(cost.get("cost") or 0),
+                    "currency": cost.get("currency") or "",
+                }
+            )
+        return correlated
+
+    def _recommendation_reason(
+        self, recommendation: dict[str, Any], resource: dict[str, Any]
+    ) -> str:
+        evidence = recommendation.get("evidence") or {}
+        waste_level = evidence.get("wasteLevel") or resource.get("waste_level") or resource.get("wasteLevel")
+        basis = evidence.get("costBasis") or resource.get("cost_basis") or resource.get("costBasis")
+        parts = []
+        if waste_level and waste_level != "NONE":
+            parts.append(f"waste level {waste_level}")
+        if basis:
+            parts.append(f"cost basis {basis}")
+        return "; ".join(parts) if parts else "recommendation record"
+
+    @staticmethod
+    def _is_utilization_resource(item: dict[str, Any]) -> bool:
+        resource_type = str(
+            item.get("resource_type") or item.get("resourceType") or ""
+        ).lower()
+        return any(
+            term in resource_type
+            for term in (
+                "virtual machine",
+                "microsoft.compute/virtualmachines",
+                "microsoft.compute/virtualmachinescalesets",
+                "aks cluster",
+                "microsoft.containerservice/managedclusters",
+            )
+        )
+
+    @staticmethod
+    def _normalize_resource_id(value: Any) -> str:
+        return str(value or "").strip().rstrip("/").lower()
+
+    @staticmethod
+    def _requested_top_n(question: str) -> int:
+        import re
+
+        match = re.search(r"\btop\s+(\d+)\b", question.lower())
+        if match:
+            return max(1, min(int(match.group(1)), 25))
+        if "highest" in question.lower():
+            return 1
+        return 5
+
+    @staticmethod
+    def _resource_name_from_id(resource_id: str) -> str:
+        if not resource_id or resource_id == "(unallocated)":
+            return "Unallocated subscription/service cost"
+        return resource_id.rstrip("/").split("/")[-1] or resource_id
+
+    def _cost_resource_label(
+        self, item: dict[str, Any], resources_by_id: dict[str, dict[str, Any]]
+    ) -> str:
+        resource = resources_by_id.get(item["resource_id"], {})
+        name = resource.get("resource_name") or resource.get("resourceName")
+        resource_type = resource.get("resource_type") or resource.get("resourceType")
+        if not name:
+            name = self._resource_name_from_id(item["resource_id"])
+        if resource_type:
+            return f"{name} ({resource_type})"
+        return name
+
+    @staticmethod
+    def _first_number(
+        item: dict[str, Any], attrs: dict[str, Any], *keys: str
+    ) -> float | None:
+        for key in keys:
+            value = item.get(key)
+            if value is None:
+                value = attrs.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
 
     def _rule_based_answer(self, question: str) -> str:
         ctx = self._load_context()
@@ -200,6 +976,9 @@ class FinOpsAdvisor:
         if "saving" in q or "opportunit" in q or "biggest" in q:
             return self._answer_savings_opportunities(resources, ctx.get("waste", {}))
 
+        if "cost" in q or "summary" in q or "recommendation" in q:
+            return self._answer_cost_and_recommendation_summary(ctx, resources)
+
         flagged = resources[resources["waste_level"] != "NONE"]
         if not flagged.empty:
             row = flagged.sort_values("estimated_savings", ascending=False).iloc[0]
@@ -212,6 +991,44 @@ class FinOpsAdvisor:
             "- Why did costs spike?\n"
             "- What are my biggest savings opportunities?"
         )
+
+    def _answer_cost_and_recommendation_summary(
+        self, ctx: dict[str, Any], resources: pd.DataFrame
+    ) -> str:
+        summary = ctx.get("summary", {})
+        recommendations = ctx.get("recommendations", [])
+        total_cost = summary.get("total_cost", {})
+        if not total_cost and "total_cost_usd" in summary:
+            total_cost = {"USD": summary["total_cost_usd"]}
+        savings = summary.get("total_estimated_savings", {})
+        if not savings and "total_estimated_savings_usd" in summary:
+            savings = {"USD": summary["total_estimated_savings_usd"]}
+        flagged = (
+            resources[resources["waste_level"] != "NONE"].sort_values(
+                "estimated_savings", ascending=False
+            )
+            if "waste_level" in resources
+            else pd.DataFrame()
+        )
+
+        lines = [
+            "Executive Summary",
+            "",
+            f"- Total Azure spend: {format_money_totals(total_cost) or 'N/A'}",
+            f"- Resources reviewed: {len(resources)}",
+            f"- Optimization opportunities: {summary.get('waste_resource_count', len(flagged))}",
+            f"- Estimated monthly savings: {format_money_totals(savings) or 'N/A'}",
+        ]
+        if not flagged.empty:
+            lines.extend(["", "Recommended Actions"])
+            for i, (_, row) in enumerate(flagged.head(5).iterrows(), 1):
+                lines.append(
+                    f"{i}. {row.get('resource_name', 'unknown')} "
+                    f"({row.get('resource_type', 'resource')}) - "
+                    f"{row.get('recommendation', 'Review resource')} - "
+                    f"{format_money(row.get('estimated_savings', 0), row.get('savings_currency', ''))}/month"
+                )
+        return "\n".join(lines)
 
     def _answer_top_vm_waste(self, resources: pd.DataFrame) -> str:
         vms = resources[

@@ -109,7 +109,7 @@ class _FakeHttp:
         return _Response(200, {"value": []})
 
 
-def test_subscription_discovery_and_optional_access(test_settings) -> None:
+def test_subscription_discovery_and_required_access(test_settings) -> None:
     client = AzureAccessClient("token", http=_FakeHttp)
     subscriptions = client.discover_subscriptions()
     checks = client.validate_subscription("subscription-a")
@@ -117,7 +117,8 @@ def test_subscription_discovery_and_optional_access(test_settings) -> None:
     assert checks["costManagement"].status == "passed"
     assert checks["resourceGraph"].status == "passed"
     assert checks["monitor"].status == "failed"
-    assert checks["monitor"].mandatory is False
+    assert checks["monitor"].mandatory is True
+    assert checks["advisor"].mandatory is True
 
 
 class _FakeAccessClient:
@@ -162,15 +163,15 @@ class _FakeAccessClient:
             ),
             "advisor": ValidationCheck(
                 name="Advisor",
-                status="failed",
-                mandatory=False,
-                message="optional permission missing",
+                status="passed",
+                mandatory=True,
+                message="ok",
             ),
             "monitor": ValidationCheck(
                 name="Monitor",
-                status="failed",
-                mandatory=False,
-                message="optional permission missing",
+                status="passed",
+                mandatory=True,
+                message="ok",
             ),
         }
 
@@ -192,10 +193,10 @@ def test_onboarding_persists_user_subscription_and_health(test_settings) -> None
     storage = create_storage_provider(test_settings)
     assert storage.tenant_users.list("tenant-a")[0].roles == ["tenant_admin"]
     assert storage.subscriptions.list("tenant-a")[0].selected is True
-    assert health[0].validation_status == "passed_with_warnings"
+    assert health[0].validation_status == "passed"
     assert storage.tenant_health.get(
         "tenant-a", "subscription-a"
-    ).validation_status == "passed_with_warnings"
+    ).validation_status == "passed"
     assert tenant.onboarding_status == "completed"
 
 

@@ -70,6 +70,30 @@ RECOMMENDATIONS_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
+FINOPS_RECOMMENDATION_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            FINOPS_SYSTEM_PROMPT
+            + "\nYou are writing like a senior Azure FinOps consultant. "
+            "Do not expose raw repository rows. Reason from the supplied analysis JSON.",
+        ),
+        (
+            "human",
+            "User question: {input}\n\n"
+            "FinOps analysis JSON:\n{analysis}\n\n"
+            "Generate a concise recommendation plan with these sections:\n"
+            "1. Executive diagnosis\n"
+            "2. Top spend categories\n"
+            "3. Root causes\n"
+            "4. Prioritized actions with priority High/Medium/Low\n"
+            "5. Estimated savings\n\n"
+            "Use only resource names, costs, savings, utilization metrics, and Advisor evidence in the JSON. "
+            "If savings are not quantified, say so. Do not invent discounts, SKUs, or resources.",
+        ),
+    ]
+)
+
 DOCUMENT_TEMPLATE = PromptTemplate.from_template(
     "Resource: {resource_name}\n"
     "Type: {resource_type}\n"

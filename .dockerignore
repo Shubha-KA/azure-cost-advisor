@@ -20,3 +20,12 @@ logs
 *.tfstate
 *.tfplan
 *.log
+.env
+.env.*
+docker-compose.env
+auth-inspect*.json
+*_logs.txt
+*.key
+*.b64
+tf_out.json
+bootstrap-outputs.json

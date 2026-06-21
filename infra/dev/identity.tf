@@ -7,7 +7,7 @@ data "azuread_service_principal" "azure_service_management" {
 
 resource "azuread_application" "login" {
   display_name     = "azure-cost-advisor-${var.environment}-login"
-  sign_in_audience = "AzureADMultipleOrgs"
+  sign_in_audience = "AzureADandPersonalMicrosoftAccount"
   owners           = [data.azuread_client_config.current.object_id]
 
   web {

@@ -9,9 +9,9 @@ from src.ai.inventory import ResourceGraphInventoryService
 from src.ai.inventory import InventoryQueryError
 from src.ai.advisor import FinOpsAdvisor
 from src.ai.rag import RAGPipeline
-from src.ai.router import route_query
+from src.ai.router import classify_intent, route_query
 from src.domain.context import OperationContext
-from src.domain.models import CostFact, ProcessingRun, ResourceFact
+from src.domain.models import CostFact, ProcessingRun, Recommendation, ResourceFact
 from src.repositories.errors import TenantScopeError
 from src.search.azure_ai_search import AzureAISearchProvider
 from src.search.knowledge import KnowledgeService
@@ -313,7 +313,7 @@ def test_live_inventory_response_has_required_provenance(test_settings):
     ]
     assert result["result_count"] == 1
     assert route_query("Show storage accounts") == "live_inventory"
-    assert route_query("Show last month's cost trend") == "historical"
+    assert route_query("Show last month's cost trend") == "cost_analysis"
 
 
 def test_entra_inventory_requires_tenant_scoped_credential(test_settings):
@@ -364,7 +364,356 @@ def test_inventory_chat_never_uses_historical_search(
     )
     answer = advisor.ask("Show Key Vaults")
 
-    assert "Azure Resource Graph (LIVE)" in answer
-    assert "Subscription scope: subscription-a" in answer
-    assert "Result count: 1" in answer
+    assert "Azure Resource Graph (LIVE)" not in answer
+    assert "Subscription scope: subscription-a" not in answer
+    assert "Result count: 1" not in answer
+    assert "Collection run" not in answer
     assert "vault-a" in answer
+
+
+@pytest.mark.parametrize(
+    ("question", "route"),
+    [
+        ("which resource is costing me more", "cost_analysis"),
+        ("highest cost resource", "cost_analysis"),
+        ("top spend resources", "cost_analysis"),
+        ("list all resources", "live_inventory"),
+        ("what resources exist in eastus", "live_inventory"),
+        ("how can I save money", "recommendation"),
+        ("How can I reduce my spend?", "recommendation"),
+        ("show recommendations", "recommendation"),
+        ("which AKS node pool costs most", "cost_analysis"),
+    ],
+)
+def test_finops_intent_precedence_scores_all_intents(question, route):
+    classification = classify_intent(question)
+
+    assert classification.route == route
+    assert route_query(question) == route
+
+
+def test_cost_question_uses_cost_facts_not_inventory_or_rag(test_settings, monkeypatch):
+    storage = create_storage_provider(test_settings)
+    context = OperationContext.create("tenant-a", "subscription-a")
+    storage.cost_facts.upsert_many(
+        "tenant-a",
+        [
+            CostFact(
+                **context.document_fields(),
+                date="2026-06-01",
+                resourceId="/subscriptions/a/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-a",
+                resourceGroup="rg",
+                serviceName="Virtual Machines",
+                costAmount=25,
+                currency="INR",
+                sourceSystem="Azure Cost Management",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            ),
+            CostFact(
+                **context.document_fields(),
+                date="2026-06-01",
+                resourceId="/subscriptions/a/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-a",
+                resourceGroup="rg",
+                serviceName="IP Addresses",
+                costAmount=5,
+                currency="INR",
+                sourceSystem="Azure Cost Management",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            ),
+        ],
+    )
+    storage.resources.upsert_many(
+        "tenant-a",
+        [
+            ResourceFact(
+                **context.document_fields(),
+                resourceId="/subscriptions/a/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-a",
+                resourceName="vm-a",
+                resourceType="microsoft.compute/virtualmachines",
+                resourceGroup="rg",
+                sourceSystem="Azure Resource Graph",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            )
+        ],
+    )
+    storage.recommendations.upsert_many(
+        "tenant-a",
+        [
+            Recommendation(
+                **context.document_fields(),
+                resourceId="/subscriptions/a/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-a",
+                title="Rightsize VM",
+                content="Review VM size.",
+                estimatedSavings=10,
+                currency="INR",
+                sourceSystem="rules",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            )
+        ],
+    )
+
+    monkeypatch.setattr(
+        "src.ai.advisor.ResourceGraphInventoryService",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Cost questions must not use live inventory")
+        ),
+    )
+    advisor = FinOpsAdvisor(
+        test_settings,
+        tenant_id="tenant-a",
+        subscription_ids=["subscription-a"],
+    )
+    advisor.rag.invoke = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("Cost questions must not use generic RAG first")
+    )
+
+    answer = advisor.ask("which resource is costing me more")
+
+    assert "Route selected" not in answer
+    assert "Retrieval source" not in answer
+    assert "Cost records analyzed" not in answer
+    assert "vm-a" in answer
+    assert "INR 25.00" in answer
+
+
+def test_ai_debug_mode_exposes_diagnostics_when_enabled(test_settings):
+    test_settings.ai_debug_mode = True
+    advisor = FinOpsAdvisor(
+        test_settings,
+        tenant_id="tenant-a",
+        subscription_ids=["subscription-a"],
+    )
+
+    answer = advisor.ask("highest cost resource")
+
+    assert "Debug Details" in answer
+    assert "Detected intent: Cost Analysis" in answer
+    assert "Route selected: cost_analysis" in answer
+    assert "Retrieval source:" in answer
+
+
+def test_optimization_question_correlates_recommendations_costs_and_resources(
+    test_settings,
+):
+    storage = create_storage_provider(test_settings)
+    context = OperationContext.create("tenant-a", "subscription-a")
+    resource_id = "/subscriptions/a/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-a"
+    storage.cost_facts.upsert_many(
+        "tenant-a",
+        [
+            CostFact(
+                **context.document_fields(),
+                date="2026-06-01",
+                resourceId=resource_id,
+                resourceGroup="rg",
+                serviceName="IP Addresses",
+                costAmount=12,
+                currency="INR",
+                sourceSystem="Azure Cost Management",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            )
+        ],
+    )
+    storage.resources.upsert_many(
+        "tenant-a",
+        [
+            ResourceFact(
+                **context.document_fields(),
+                resourceId=resource_id,
+                resourceName="pip-a",
+                resourceType="Public IP Address",
+                resourceGroup="rg",
+                wasteLevel="MEDIUM",
+                recommendation="Delete Public IP",
+                estimatedSavings=12,
+                savingsCurrency="INR",
+                sourceSystem="Azure Resource Graph",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            )
+        ],
+    )
+    storage.recommendations.upsert_many(
+        "tenant-a",
+        [
+            Recommendation(
+                **context.document_fields(),
+                resourceId=resource_id,
+                title="pip-a optimization",
+                content="Delete Public IP",
+                estimatedSavings=12,
+                currency="INR",
+                sourceSystem="Rule-based processing",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+                evidence={"wasteLevel": "MEDIUM", "costBasis": "actual"},
+            )
+        ],
+    )
+    advisor = FinOpsAdvisor(
+        test_settings,
+        tenant_id="tenant-a",
+        subscription_ids=["subscription-a"],
+    )
+
+    answer = advisor.ask("How can I reduce my spend?")
+
+    assert "Route selected" not in answer
+    assert "Retrieval source" not in answer
+    assert "pip-a (Public IP Address)" in answer
+    assert "Delete Public IP" in answer
+    assert "observed spend INR 12.00" in answer
+    assert "waste level MEDIUM" in answer
+
+
+def test_utilization_question_only_returns_compute_resources(test_settings):
+    storage = create_storage_provider(test_settings)
+    context = OperationContext.create("tenant-a", "subscription-a")
+    storage.resources.upsert_many(
+        "tenant-a",
+        [
+            ResourceFact(
+                **context.document_fields(),
+                resourceId="/subscriptions/a/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-a",
+                resourceName="vm-a",
+                resourceType="Virtual Machine",
+                resourceGroup="rg",
+                wasteLevel="HIGH",
+                recommendation="Rightsize VM",
+                estimatedSavings=20,
+                savingsCurrency="INR",
+                sourceSystem="Azure Monitor",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+                attributes={
+                    "cpu_avg_percent": 2.0,
+                    "memory_avg_percent": 12.0,
+                    "rule_id": "oversized_vm",
+                },
+            ),
+            ResourceFact(
+                **context.document_fields(),
+                resourceId="/subscriptions/a/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip-a",
+                resourceName="pip-a",
+                resourceType="Public IP Address",
+                resourceGroup="rg",
+                wasteLevel="MEDIUM",
+                recommendation="Delete Public IP",
+                estimatedSavings=5,
+                savingsCurrency="INR",
+                sourceSystem="Azure Resource Graph",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+                attributes={"cpu_avg_percent": 0.0, "memory_avg_percent": 0.0},
+            ),
+        ],
+    )
+    advisor = FinOpsAdvisor(
+        test_settings,
+        tenant_id="tenant-a",
+        subscription_ids=["subscription-a"],
+    )
+
+    answer = advisor.ask("which VM is underutilized?")
+
+    assert "Route selected" not in answer
+    assert "Retrieval source" not in answer
+    assert "vm-a" in answer
+    assert "pip-a" not in answer
+
+
+class _NarrativeLLMResponse:
+    content = (
+        "Executive diagnosis\n"
+        "Application Gateway is a major cost driver and AKS has quantified savings.\n\n"
+        "Top spend categories\n"
+        "- Application Gateway\n\n"
+        "Root causes\n"
+        "- Underutilized AKS capacity\n\n"
+        "Prioritized actions\n"
+        "- Priority High: Enable autoscaler on aks-a\n\n"
+        "Estimated savings\n"
+        "- INR 100/month"
+    )
+    usage_metadata = {}
+    response_metadata = {}
+
+
+class _NarrativeLLM:
+    def __init__(self):
+        self.messages = None
+
+    def invoke(self, messages):
+        self.messages = messages
+        return _NarrativeLLMResponse()
+
+
+def test_optimization_uses_llm_narrative_when_available(test_settings):
+    storage = create_storage_provider(test_settings)
+    context = OperationContext.create("tenant-a", "subscription-a")
+    resource_id = "/subscriptions/a/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/aks-a"
+    storage.cost_facts.upsert_many(
+        "tenant-a",
+        [
+            CostFact(
+                **context.document_fields(),
+                date="2026-06-01",
+                resourceId=resource_id,
+                resourceGroup="rg",
+                serviceName="Azure Kubernetes Service",
+                costAmount=200,
+                currency="INR",
+                sourceSystem="Azure Cost Management",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+            )
+        ],
+    )
+    storage.resources.upsert_many(
+        "tenant-a",
+        [
+            ResourceFact(
+                **context.document_fields(),
+                resourceId=resource_id,
+                resourceName="aks-a",
+                resourceType="AKS Cluster",
+                resourceGroup="rg",
+                wasteLevel="HIGH",
+                recommendation="Enable Autoscaler",
+                estimatedSavings=100,
+                savingsCurrency="INR",
+                sourceSystem="Azure Monitor",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+                attributes={"cpu_avg_percent": 8.0, "memory_avg_percent": 40.0},
+            )
+        ],
+    )
+    storage.recommendations.upsert_many(
+        "tenant-a",
+        [
+            Recommendation(
+                **context.document_fields(),
+                resourceId=resource_id,
+                title="aks-a optimization",
+                content="Enable Autoscaler",
+                estimatedSavings=100,
+                currency="INR",
+                sourceSystem="Rule-based processing",
+                sourceTimestamp="2026-06-01T00:00:00Z",
+                evidence={"wasteLevel": "HIGH", "costBasis": "actual"},
+            )
+        ],
+    )
+    llm = _NarrativeLLM()
+    advisor = FinOpsAdvisor(
+        test_settings,
+        tenant_id="tenant-a",
+        subscription_ids=["subscription-a"],
+        llm=llm,
+    )
+
+    answer = advisor.ask("How can I reduce my spend?")
+
+    assert "Executive diagnosis" in answer
+    assert "Route selected" not in answer
+    assert "Retrieval source" not in answer
+    assert llm.messages is not None
+    prompt_text = "\n".join(str(message.content) for message in llm.messages)
+    assert "FinOps analysis JSON" in prompt_text
+    assert "top_spend_categories" in prompt_text
+    assert "opportunities" in prompt_text

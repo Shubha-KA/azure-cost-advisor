@@ -209,7 +209,7 @@ def run_all(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run all Azure Cost Advisor data collectors"
+        description="Run all FinsOpsIQ data collectors"
     )
     parser.add_argument(
         "--no-csv",

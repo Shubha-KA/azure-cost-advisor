@@ -337,8 +337,28 @@ def _resource_fact_document(row: dict, context: OperationContext) -> dict:
         "waste_level", "recommendation", "estimated_savings",
         "savings_currency", "source_system", "source_timestamp",
     }
-    canonical["attributes"] = {key: value for key, value in row.items() if key not in known}
+    utilization_keys = {"cpu_avg_percent", "memory_avg_percent", "node_utilization"}
+    utilizable = _supports_utilization(row.get("resource_type", ""))
+    canonical["attributes"] = {
+        key: value
+        for key, value in row.items()
+        if key not in known and (utilizable or key not in utilization_keys)
+    }
     return canonical
+
+
+def _supports_utilization(resource_type: str) -> bool:
+    value = str(resource_type or "").lower()
+    return any(
+        term in value
+        for term in (
+            "virtual machine",
+            "microsoft.compute/virtualmachines",
+            "microsoft.compute/virtualmachinescalesets",
+            "aks cluster",
+            "microsoft.containerservice/managedclusters",
+        )
+    )
 
 
 def _reconcile_costs(
@@ -388,7 +408,7 @@ def _reconcile_costs(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Azure Cost Advisor processor")
+    parser = argparse.ArgumentParser(description="FinsOpsIQ processor")
     args = parser.parse_args()
     _, report = run_processing()
     print(f"Resources processed: {report.resource_count}")

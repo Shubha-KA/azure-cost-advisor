@@ -107,7 +107,7 @@ jobs:
       - name: Build & push api-gateway
         run: |
           IMAGE=${{ steps.acr.outputs.acr_name }}.azurecr.io/api-gateway:${IMAGE_TAG}
-          docker build -f Dockerfile.api -t $IMAGE .
+          docker build -f deploy/Dockerfile.service --build-arg SERVICE_MODULE=src.microservices.gateway_service -t $IMAGE .
           docker push $IMAGE
           docker tag $IMAGE ${{ steps.acr.outputs.acr_name }}.azurecr.io/api-gateway:latest
           docker push ${{ steps.acr.outputs.acr_name }}.azurecr.io/api-gateway:latest

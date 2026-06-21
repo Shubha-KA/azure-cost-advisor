@@ -66,7 +66,7 @@ def run_pipeline(skip_ai: bool = False) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Azure Cost Advisor pipeline")
+    parser = argparse.ArgumentParser(description="FinsOpsIQ pipeline")
     parser.add_argument(
         "--skip-ai",
         action="store_true",

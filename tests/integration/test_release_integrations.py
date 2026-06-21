@@ -82,3 +82,5 @@ def test_delegated_subscription_discovery_and_rbac():
     assert checks["subscriptionAccess"].status == "passed"
     assert checks["costManagement"].status == "passed"
     assert checks["resourceGraph"].status == "passed"
+    assert checks["advisor"].status == "passed"
+    assert checks["monitor"].status == "passed"

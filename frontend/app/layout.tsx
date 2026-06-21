@@ -4,7 +4,7 @@ import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
-  title: "Azure Cost Advisor",
+  title: "FinsOpsIQ",
   description: "Multi-tenant Azure FinOps intelligence",
 };
 

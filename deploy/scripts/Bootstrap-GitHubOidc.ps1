@@ -1,7 +1,8 @@
 param(
     [string]$Repository = "Shubha-KA/azure-cost-advisor",
     [string]$ApplicationName = "azure-cost-advisor-github-deploy",
-    [string]$SubscriptionId = "e54a7ca3-4b6b-4b0f-889d-2508c85f4f30"
+    [Parameter(Mandatory = $true)]
+    [string]$SubscriptionId
 )
 
 $ErrorActionPreference = "Stop"

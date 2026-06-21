@@ -1,6 +1,30 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+const PUBLIC_ROUTES = new Set([
+  "/",
+  "/login",
+  "/api/auth/login",
+  "/api/auth/callback",
+]);
+
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/chat",
+  "/assistant",
+  "/costs",
+  "/recommendations",
+  "/resources",
+  "/onboarding",
+  "/admin",
+];
+
+function isProtectedRoute(pathname: string) {
+  return PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 export function middleware(request: NextRequest) {
   // Kubernetes health probes follow redirects by default and will 404 if redirected to the gateway.
   // We intercept them here and return a 200 OK to keep the pod healthy.
@@ -8,29 +32,34 @@ export function middleware(request: NextRequest) {
     return new NextResponse("OK", { status: 200 });
   }
 
-  // If user doesn't have the finops_session cookie, they are not authenticated
+  const { pathname } = request.nextUrl;
+
+  if (PUBLIC_ROUTES.has(pathname)) {
+    return NextResponse.next();
+  }
+
   const session = request.cookies.get("finops_session");
 
-  if (!session) {
-    // Save the requested URL so we could potentially redirect back after login
-    // but for now we just send them to login which defaults to dashboard
+  if (!session && isProtectedRoute(pathname)) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
   return NextResponse.next();
 }
 
-// See "Matching Paths" below to learn more
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - login (login page — must be accessible without session)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico, sitemap.xml, robots.txt (metadata files)
-     */
-    '/((?!api|login|_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
+    "/",
+    "/login",
+    "/dashboard/:path*",
+    "/chat/:path*",
+    "/assistant/:path*",
+    "/costs/:path*",
+    "/recommendations/:path*",
+    "/resources/:path*",
+    "/onboarding/:path*",
+    "/admin/:path*",
+    "/api/auth/login",
+    "/api/auth/callback",
   ],
 };

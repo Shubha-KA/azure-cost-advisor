@@ -14,7 +14,7 @@ from src.storage.factory import create_storage_provider
 def service_app(name: str, *, storage=None) -> FastAPI:
     settings = get_settings().model_copy(update={"service_name": name})
     configure_observability(settings)
-    app = FastAPI(title=f"Azure Cost Advisor {name}", version="1.0.0")
+    app = FastAPI(title=f"FinsOpsIQ {name}", version="1.0.0")
     app.state.settings = settings
     app.state.storage = storage or create_storage_provider(settings)
     app.state.metrics = ApiMetrics()
@@ -45,16 +45,17 @@ def require_internal(request: Request) -> dict:
         raise HTTPException(401, "Service token required")
     token = authorization[7:].strip()
     try:
-        try:
-            return jwt.decode(
-                token,
-                settings.api_session_secret,
-                algorithms=["HS256"],
-                issuer="azure-cost-advisor",
-                audience="azure-cost-advisor-api",
-            )
-        except jwt.PyJWTError:
-            pass
+        for audience in (settings.internal_api_audience, "azure-cost-advisor-api"):
+            try:
+                return jwt.decode(
+                    token,
+                    settings.api_session_secret,
+                    algorithms=["HS256"],
+                    issuer="azure-cost-advisor",
+                    audience=audience,
+                )
+            except jwt.PyJWTError:
+                pass
 
         unverified = jwt.decode(token, options={"verify_signature": False})
         tenant_id = str(unverified.get("tid", "organizations"))

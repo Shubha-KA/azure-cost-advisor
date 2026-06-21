@@ -101,9 +101,10 @@ class AuthApplicationService:
             }
         )
 
-        # Determine redirect destination based on tenant onboarding status
-        tenant = self.storage.tenants.get(session.profile.tenant_id)
-        if tenant and tenant.onboarding_status == "completed":
+        # Determine redirect destination based on tenant onboarding and initial
+        # collection status. A completed onboarding record is not sufficient:
+        # the first collection must also finish successfully.
+        if self._onboarding_state(session.profile.tenant_id)["status"] == "ready":
             redirect_path = "/dashboard"
         else:
             redirect_path = "/onboarding"
@@ -212,13 +213,103 @@ class AuthApplicationService:
 
     def onboarding_status(self, request: Request):
         identity = get_identity(request)
-        tenant = self.storage.tenants.get(identity.tenant_id)
+        return self._onboarding_state(identity.tenant_id)
+
+    def _onboarding_state(self, tenant_id: str) -> dict:
+        tenant = self.storage.tenants.get(tenant_id)
         if not tenant:
             return {"status": "unknown"}
         if tenant.onboarding_status != "completed":
+            health_records = self.storage.tenant_health.list(tenant_id)
+            selected_subscriptions = [
+                item
+                for item in self.storage.subscriptions.list(tenant_id)
+                if item.selected
+            ]
+            failed_health = [
+                item
+                for item in health_records
+                if item.validation_status == "failed"
+            ]
+            if failed_health:
+                return {
+                    "status": "permission_validation_failed",
+                    "message": "Required Azure permissions are missing.",
+                    "validationResults": [
+                        item.model_dump(by_alias=True, mode="json")
+                        for item in failed_health
+                    ],
+                }
+            pending_validation = [
+                item
+                for item in selected_subscriptions
+                if item.onboarding_status in {
+                    "validation_pending",
+                    "validation_failed",
+                }
+            ]
+            if pending_validation:
+                return {
+                    "status": "permission_validation_required",
+                    "message": "Selected subscriptions must pass permission validation before collection can start.",
+                    "subscriptions": [
+                        item.model_dump(by_alias=True, mode="json")
+                        for item in pending_validation
+                    ],
+                    "validationResults": [
+                        item.model_dump(by_alias=True, mode="json")
+                        for item in health_records
+                    ],
+                }
             return {"status": tenant.onboarding_status}
-        
-        return {"status": "ready"}
+
+        subscriptions = [
+            item for item in self.storage.subscriptions.list(tenant_id)
+            if item.selected and item.onboarding_status == "validated"
+        ]
+        if not subscriptions:
+            return {
+                "status": "pending_collection",
+                "message": "No validated selected subscriptions are ready for collection.",
+            }
+
+        details = []
+        for subscription in subscriptions:
+            runs = [
+                item for item in self.storage.processing_metadata.list_latest(
+                    tenant_id, subscription.subscription_id
+                )
+                if item.get("metadataType") == "collectionRun"
+            ]
+            latest = runs[0] if runs else None
+            details.append(
+                {
+                    "subscriptionId": subscription.subscription_id,
+                    "displayName": subscription.display_name,
+                    "collection": latest,
+                }
+            )
+            if latest is None:
+                return {
+                    "status": "pending_collection",
+                    "message": "Initial collection has not started yet.",
+                    "subscriptions": details,
+                }
+            if latest.get("status") == "running":
+                return {
+                    "status": "collecting",
+                    "message": "Initial collection is running.",
+                    "subscriptions": details,
+                }
+            if latest.get("status") != "completed":
+                return {
+                    "status": "collection_failed",
+                    "message": "Collection failed",
+                    "errors": latest.get("errors", []),
+                    "subscriptions": details,
+                }
+
+        return {"status": "ready", "subscriptions": details}
 
     def discover_subscriptions(self, request: Request):
         get_identity(request)  # ensure authenticated
@@ -246,42 +337,79 @@ class AuthApplicationService:
         if any(item.validation_status == "failed" for item in health_records):
             return {
                 "success": False,
+                "message": "Required Azure permissions are missing. Collection has not started.",
                 "validationResults": [item.model_dump(by_alias=True, mode="json") for item in health_records]
             }
 
         service.complete_onboarding(session, subscription_ids)
 
-        # Trigger first collection run asynchronously
-        async def _trigger():
-            import jwt
-            from datetime import datetime, timedelta, timezone
-            now = datetime.now(timezone.utc)
-            internal_token = jwt.encode(
-                {"iss": "azure-cost-advisor", "aud": self.settings.internal_api_audience, "exp": now + timedelta(hours=1)},
-                self.settings.api_session_secret,
-                algorithm="HS256"
-            )
-            headers = {"Authorization": f"Bearer {internal_token}"}
-            async with httpx.AsyncClient(timeout=10) as client:
-                for sub_id in subscription_ids:
-                    url = f"{self.settings.collection_service_url}/internal/collections"
-                    try:
-                        logger.info("collection_trigger_start url=%s tenant_id=%s subscription_id=%s", url, session.profile.tenant_id, sub_id)
-                        response = await client.post(
-                            url,
-                            json={"tenantId": session.profile.tenant_id, "subscriptionId": sub_id},
-                            headers=headers
-                        )
-                        if response.status_code >= 400:
-                            logger.error("collection_trigger_failed url=%s status_code=%s response=%s", url, response.status_code, response.text)
-                        else:
-                            logger.info("collection_trigger_success url=%s status_code=%s", url, response.status_code)
-                    except httpx.RequestError as exc:
-                        logger.error("collection_trigger_request_error url=%s exception=%s message=%s", url, type(exc).__name__, str(exc))
         import asyncio
-        asyncio.create_task(_trigger())
+        asyncio.create_task(
+            self._trigger_collections(session.profile.tenant_id, subscription_ids)
+        )
 
         return {
             "success": True,
             "validationResults": [item.model_dump(by_alias=True, mode="json") for item in health_records]
         }
+
+    async def retry_collection(self, request: Request):
+        identity = get_identity(request)
+        subscription_ids = [
+            item.subscription_id
+            for item in self.storage.subscriptions.list(identity.tenant_id)
+            if item.selected and item.onboarding_status == "validated"
+        ]
+        if not subscription_ids:
+            raise HTTPException(400, "No validated selected subscriptions to collect")
+        await self._trigger_collections(identity.tenant_id, subscription_ids)
+        return {"success": True, "subscriptionIds": subscription_ids}
+
+    async def _trigger_collections(self, tenant_id: str, subscription_ids: list[str]):
+        import jwt
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        internal_token = jwt.encode(
+            {
+                "iss": "azure-cost-advisor",
+                "aud": self.settings.internal_api_audience,
+                "exp": now + timedelta(hours=1),
+            },
+            self.settings.api_session_secret,
+            algorithm="HS256",
+        )
+        headers = {"Authorization": f"Bearer {internal_token}"}
+        async with httpx.AsyncClient(timeout=10) as client:
+            for sub_id in subscription_ids:
+                url = f"{self.settings.collection_service_url}/internal/collections"
+                payload = {"tenantId": tenant_id, "subscriptionId": sub_id}
+                try:
+                    logger.info(
+                        "collection_trigger_start url=%s payload=%s",
+                        url,
+                        payload,
+                    )
+                    response = await client.post(url, json=payload, headers=headers)
+                    if response.status_code >= 400:
+                        logger.error(
+                            "collection_trigger_failed url=%s status_code=%s response=%s",
+                            url,
+                            response.status_code,
+                            response.text,
+                        )
+                    else:
+                        logger.info(
+                            "collection_trigger_success url=%s status_code=%s response=%s",
+                            url,
+                            response.status_code,
+                            response.text[:1000],
+                        )
+                except httpx.RequestError as exc:
+                    logger.error(
+                        "collection_trigger_request_error url=%s payload=%s exception=%s message=%s",
+                        url,
+                        payload,
+                        type(exc).__name__,
+                        str(exc),
+                    )
