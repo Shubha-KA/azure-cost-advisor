@@ -19,6 +19,9 @@ from src.compliance.lifecycle import TenantLifecycleService
 from src.events.contracts import EventType, PlatformEvent
 from src.onboarding.service import TenantOnboardingService
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 FLOW_COOKIE = "finops_auth_flow"
 
@@ -249,18 +252,32 @@ class AuthApplicationService:
         service.complete_onboarding(session, subscription_ids)
 
         # Trigger first collection run asynchronously
-        headers = {"Authorization": f"Bearer {request.cookies.get(SESSION_COOKIE, '')}"}
         async def _trigger():
+            import jwt
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            internal_token = jwt.encode(
+                {"iss": "azure-cost-advisor", "aud": self.settings.internal_api_audience, "exp": now + timedelta(hours=1)},
+                self.settings.api_session_secret,
+                algorithm="HS256"
+            )
+            headers = {"Authorization": f"Bearer {internal_token}"}
             async with httpx.AsyncClient(timeout=10) as client:
                 for sub_id in subscription_ids:
+                    url = f"{self.settings.collection_service_url}/internal/collections"
                     try:
-                        await client.post(
-                            f"{self.settings.collection_service_url}/internal/collections",
-                            json={"tenantId": session.tenant_id, "subscriptionId": sub_id},
+                        logger.info("collection_trigger_start url=%s tenant_id=%s subscription_id=%s", url, session.profile.tenant_id, sub_id)
+                        response = await client.post(
+                            url,
+                            json={"tenantId": session.profile.tenant_id, "subscriptionId": sub_id},
                             headers=headers
                         )
-                    except httpx.RequestError:
-                        pass
+                        if response.status_code >= 400:
+                            logger.error("collection_trigger_failed url=%s status_code=%s response=%s", url, response.status_code, response.text)
+                        else:
+                            logger.info("collection_trigger_success url=%s status_code=%s", url, response.status_code)
+                    except httpx.RequestError as exc:
+                        logger.error("collection_trigger_request_error url=%s exception=%s message=%s", url, type(exc).__name__, str(exc))
         import asyncio
         asyncio.create_task(_trigger())
 

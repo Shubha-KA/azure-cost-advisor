@@ -16,5 +16,8 @@ set -eu
 {{- range $envName, $objectName := .service.keyVaultObjects }}
 export {{ $envName }}="$(cat {{ $.Values.global.keyVault.mountPath }}/{{ $objectName }})"
 {{- end }}
+{{- range $envName, $envValue := .service.env }}
+export {{ $envName }}="{{ $envValue }}"
+{{- end }}
 exec {{ .service.command }}
 {{- end }}

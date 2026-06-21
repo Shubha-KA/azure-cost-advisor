@@ -100,6 +100,20 @@ class EntraAuthService:
             displayName=str(claims.get("name", "")),
         )
         expires_in = int(result.get("expires_in", 3600))
+        
+        # --- TELEMETRY DUMP FOR VALIDATION ---
+        import json
+        telemetry = {
+            "oid": user_id,
+            "tid": tenant_id,
+            "tenant_name": str(claims.get("name", "")),
+            "home_account_id": result.get("account", {}).get("home_account_id", "")
+        }
+        print("\n" + "="*50)
+        print(f"AUTH TELEMETRY CAPTURED: {json.dumps(telemetry, indent=2)}")
+        print("="*50 + "\n", flush=True)
+        # -------------------------------------
+
         return AuthSession(
             profile=profile,
             accessToken=result["access_token"],

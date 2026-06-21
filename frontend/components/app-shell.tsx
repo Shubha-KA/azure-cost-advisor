@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -39,7 +40,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
   const { theme, setTheme } = useTheme();
+  useEffect(() => { setMounted(true); }, []);
   const { scope, tenants, subscriptions, setTenant, setSubscription } =
     useScope();
   return (
@@ -61,9 +64,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
-        <div className="absolute bottom-5 left-5 text-xs text-muted-foreground">
-          Streamlit remains available as Legacy Admin UI
-        </div>
       </aside>
       <div className="lg:pl-64">
         <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b bg-background/90 px-4 py-3 backdrop-blur md:px-8">
@@ -102,7 +102,9 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             className="ml-auto rounded-lg border p-2"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            <div className="h-[18px] w-[18px]">
+              {mounted && (theme === "dark" ? <Sun size={18} /> : <Moon size={18} />)}
+            </div>
           </button>
           <button
             aria-label="Sign out"

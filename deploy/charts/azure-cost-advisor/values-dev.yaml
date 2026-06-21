@@ -1,8 +1,8 @@
 global:
   ingress:
-    hostname: ""
-    sslCertificateName: ""
-    sslRedirect: false
+    hostname: "vkcolors.shop"
+    sslCertificateName: "agw-tls"
+    sslRedirect: true
 
 services:
   frontend:

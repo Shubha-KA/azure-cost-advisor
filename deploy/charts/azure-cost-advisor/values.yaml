@@ -94,6 +94,8 @@ services:
       SERVICE_BUS_NAMESPACE: service-bus-namespace
       SERVICE_BUS_TOPIC: service-bus-topic
       INTERNAL_API_AUDIENCE: internal-api-audience
+    env:
+      COLLECTION_SERVICE_URL: http://collection-service.finops-collection.svc.cluster.local:8000
     port: 8000
     replicas: 1
     autoscaling:

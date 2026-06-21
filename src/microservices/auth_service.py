@@ -12,6 +12,13 @@ app = service_app("auth-service")
 app.state.events = create_event_publisher(app.state.settings)
 app.state.application = AuthApplicationService(app)
 
+import logging
+logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("auth_service_startup collection_service_url=%s", app.state.settings.collection_service_url)
+
 
 @app.get("/api/auth/login")
 def login():

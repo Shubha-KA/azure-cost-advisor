@@ -1,23 +1,104 @@
-# Local development — mirrors Azure Container Apps Streamlit deployment
 services:
-  api:
+  api-gateway:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_MODULE: "src.microservices.gateway_service"
     ports:
       - "8000:8000"
     env_file:
+      - docker-compose.env
       - .env
     environment:
-      STORAGE_PROVIDER: "${STORAGE_PROVIDER:-file}"
-      STORAGE_DATA_DIR: /app/data
-      API_CORS_ORIGINS: http://localhost:3000
-      FRONTEND_URL: http://localhost:3000
-    volumes:
-      - ./data:/app/data
+      AUTH_SERVICE_URL: "http://auth-service:8000"
+      COLLECTION_SERVICE_URL: "http://collection-service:8000"
+      PROCESSING_SERVICE_URL: "http://processing-service:8000"
+      AI_SERVICE_URL: "http://ai-service:8000"
+      NOTIFICATION_SERVICE_URL: "http://notification-service:8000"
+      API_CORS_ORIGINS: "http://localhost:3000"
+      FRONTEND_URL: "http://localhost:3000"
+      ENTRA_AUTHORITY: "https://login.microsoftonline.com/common"
+      USE_MANAGED_IDENTITY: "false"
+    depends_on:
+      - auth-service
+      - collection-service
+      - processing-service
+      - ai-service
+      - notification-service
     restart: unless-stopped
 
-  web:
+  auth-service:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_MODULE: "src.microservices.auth_service"
+    env_file:
+      - docker-compose.env
+      - .env
+    environment:
+      COLLECTION_SERVICE_URL: "http://collection-service:8000"
+      API_CORS_ORIGINS: "http://localhost:3000"
+      FRONTEND_URL: "http://localhost:3000"
+      ENTRA_AUTHORITY: "https://login.microsoftonline.com/common"
+      USE_MANAGED_IDENTITY: "false"
+    restart: unless-stopped
+
+  collection-service:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_MODULE: "src.microservices.collection_service"
+    env_file:
+      - docker-compose.env
+      - .env
+    environment:
+      PROCESSING_SERVICE_URL: "http://processing-service:8000"
+      USE_MANAGED_IDENTITY: "false"
+    restart: unless-stopped
+
+  processing-service:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_MODULE: "src.microservices.processing_service"
+    env_file:
+      - docker-compose.env
+      - .env
+    environment:
+      USE_MANAGED_IDENTITY: "false"
+    restart: unless-stopped
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_MODULE: "src.microservices.ai_service"
+    env_file:
+      - docker-compose.env
+      - .env
+    environment:
+      USE_MANAGED_IDENTITY: "false"
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.service
+      args:
+        SERVICE_MODULE: "src.microservices.notification_service"
+    env_file:
+      - docker-compose.env
+      - .env
+    environment:
+      USE_MANAGED_IDENTITY: "false"
+    restart: unless-stopped
+
+  frontend:
     build:
       context: ./frontend
     ports:
@@ -25,55 +106,5 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     depends_on:
-      - api
+      - api-gateway
     restart: unless-stopped
-
-  cost-advisor:
-    build:
-      context: .
-      dockerfile: Dockerfile.dashboard
-    image: azure-cost-advisor:local
-    container_name: azure-cost-advisor
-    ports:
-      - "8501:8501"
-    env_file:
-      - .env
-    environment:
-      STREAMLIT_SERVER_PORT: "8501"
-      STORAGE_PROVIDER: "${STORAGE_PROVIDER:-file}"
-      STORAGE_DATA_DIR: /app/data
-      DATA_RAW_DIR: /app/data/raw
-      DATA_PROCESSED_DIR: /app/data/processed
-      DATA_EMBEDDINGS_DIR: /app/data/embeddings
-    volumes:
-      - ./data/raw:/app/data/raw
-      - ./data/processed:/app/data/processed
-      - ./data/embeddings:/app/data/embeddings
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 45s
-    restart: unless-stopped
-
-  # Optional: run collectors + processor before using the dashboard
-  pipeline:
-    build:
-      context: .
-      dockerfile: Dockerfile.pipeline
-    image: azure-cost-advisor:local
-    profiles: ["pipeline"]
-    env_file:
-      - .env
-    environment:
-      STORAGE_PROVIDER: "${STORAGE_PROVIDER:-file}"
-      STORAGE_DATA_DIR: /app/data
-    volumes:
-      - ./data:/app/data
-      - ./tests/mock_data:/app/tests/mock_data:ro
-    command: >
-      sh -c "python -m src.collector.run &&
-             python -m src.processor.run &&
-             python -m src.ai.run --build-index --skip-ai || true"
-    restart: "no"

@@ -45,6 +45,17 @@ def require_internal(request: Request) -> dict:
         raise HTTPException(401, "Service token required")
     token = authorization[7:].strip()
     try:
+        try:
+            return jwt.decode(
+                token,
+                settings.api_session_secret,
+                algorithms=["HS256"],
+                issuer="azure-cost-advisor",
+                audience="azure-cost-advisor-api",
+            )
+        except jwt.PyJWTError:
+            pass
+
         unverified = jwt.decode(token, options={"verify_signature": False})
         tenant_id = str(unverified.get("tid", "organizations"))
         keys = jwt.PyJWKClient(

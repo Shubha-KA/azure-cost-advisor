@@ -13,6 +13,8 @@ from src.events.contracts import EventType, PlatformEvent
 from src.observability import measure
 from src.processor.run import run_processing as default_run_processing
 from src.service_contracts.internal import ServiceScope
+from src.dashboard.data_loader import DashboardDataLoader
+from types import SimpleNamespace
 
 
 class ProcessingApplicationService:
@@ -83,9 +85,21 @@ class ProcessingApplicationService:
         }
 
     def cost_facts(self, scope: ServiceScope):
-        return self.app.state.storage.cost_facts.list_latest(
+        facts = self.app.state.storage.cost_facts.list_latest(
             scope.tenant_id, scope.subscription_id
         )
+        settings = self.app.state.settings
+        if (
+            facts
+            or scope.tenant_id != settings.effective_tenant_id
+            or scope.subscription_id != settings.effective_subscription_id
+        ):
+            return facts
+        frame = DashboardDataLoader(settings).load().cost_facts
+        return [
+            SimpleNamespace(**row)
+            for row in frame.to_dict(orient="records")
+        ]
 
     def group_costs(self, facts, attribute: str):
         totals = defaultdict(float)
@@ -120,28 +134,60 @@ class ProcessingApplicationService:
         return self.group_costs(facts, "date")
 
     def resources(self, scope: ServiceScope):
+        facts = self.app.state.storage.resources.list_latest(
+            scope.tenant_id, scope.subscription_id
+        )
+        settings = self.app.state.settings
+        if (
+            not facts
+            and scope.tenant_id == settings.effective_tenant_id
+            and scope.subscription_id == settings.effective_subscription_id
+        ):
+            frame = DashboardDataLoader(settings).load().resources
+            facts = [
+                SimpleNamespace(**row)
+                for row in frame.to_dict(orient="records")
+            ]
+        
         return [
-            item.model_dump(by_alias=True, mode="json")
-            for item in self.app.state.storage.resources.list_latest(
-                scope.tenant_id, scope.subscription_id
-            )
+            item.model_dump(by_alias=True, mode="json") if hasattr(item, "model_dump") else {
+                key: (None if isinstance(value, float) and value != value else value)
+                for key, value in vars(item).items()
+            }
+            for item in facts
         ]
 
     def resource(self, scope: ServiceScope, resource_id: str):
         normalized = resource_id.strip().rstrip("/").lower()
+        facts = self.app.state.storage.resources.list_latest(
+            scope.tenant_id, scope.subscription_id
+        )
+        settings = self.app.state.settings
+        if (
+            not facts
+            and scope.tenant_id == settings.effective_tenant_id
+            and scope.subscription_id == settings.effective_subscription_id
+        ):
+            frame = DashboardDataLoader(settings).load().resources
+            facts = [
+                SimpleNamespace(**row)
+                for row in frame.to_dict(orient="records")
+            ]
+            
         item = next(
             (
                 item
-                for item in self.app.state.storage.resources.list_latest(
-                    scope.tenant_id, scope.subscription_id
-                )
-                if item.resource_id == normalized
+                for item in facts
+                if getattr(item, "resource_id", getattr(item, "resourceId", "")).lower() == normalized
             ),
             None,
         )
         if item is None:
             raise HTTPException(404, "Resource not found")
-        return item.model_dump(by_alias=True, mode="json")
+        return item.model_dump(by_alias=True, mode="json") if hasattr(item, "model_dump") else {
+            key: (None if isinstance(value, float) and value != value else value)
+            for key, value in vars(item).items()
+        }
 
     def recommendations(self, scope: ServiceScope):
         return [

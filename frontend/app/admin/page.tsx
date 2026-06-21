@@ -15,7 +15,7 @@ export default function Admin() {
   useEffect(() => {
     if (!scope.tenantId) return;
     api<Subscription[]>("/api/subscriptions", scope).then(setSubscriptions);
-    api<Record<string, unknown>>("/api/metrics", scope).then(setMetrics);
+    api<Record<string, unknown>>("/api/metrics", scope).then(setMetrics).catch(() => setMetrics({ status: "Metrics disabled" }));
   }, [scope]);
   return (
     <>

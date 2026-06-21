@@ -78,9 +78,26 @@ class TenantOnboardingService:
     def discover_subscriptions(
         self, session: AuthSession
     ) -> list[DiscoveredSubscription]:
-        return self.access_client_factory(
+        results = self.access_client_factory(
             session.access_token
         ).discover_subscriptions()
+        
+        # --- TELEMETRY DUMP FOR VALIDATION ---
+        import json
+        telemetry = {
+            "tid": session.profile.tenant_id,
+            "oid": session.profile.user_id,
+            "discovered_subscriptions": [
+                {"id": s.subscription_id, "name": s.display_name, "state": s.state, "tenant_id": s.tenant_id}
+                for s in results
+            ]
+        }
+        print("\n" + "="*50)
+        print(f"SUBSCRIPTION DISCOVERY TELEMETRY: {json.dumps(telemetry, indent=2)}")
+        print("="*50 + "\n", flush=True)
+        # -------------------------------------
+
+        return results
 
     def persist_selected_subscriptions(
         self,

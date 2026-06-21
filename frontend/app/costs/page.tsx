@@ -15,7 +15,9 @@ export default function Costs() {
   const [trends, setTrends] = useState<CostRow[]>([]);
   const [services, setServices] = useState<CostRow[]>([]);
   const [groups, setGroups] = useState<CostRow[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
+    setIsMounted(true);
     if (!scope.subscriptionId) return;
     Promise.all([
       api<CostRow[]>("/api/costs/trends", scope),
@@ -27,12 +29,14 @@ export default function Costs() {
     <>
       <PageHeader title="Cost analytics" description="Currency-safe actual Azure Cost Management facts." />
       <Card className="mb-6 h-80 min-w-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={trends}>
-            <XAxis dataKey="date" /><YAxis /><Tooltip />
-            <Line type="monotone" dataKey="costAmount" stroke="#3b82f6" strokeWidth={2} />
-          </LineChart>
-        </ResponsiveContainer>
+        {isMounted && (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={trends}>
+              <XAxis dataKey="date" /><YAxis /><Tooltip />
+              <Line type="monotone" dataKey="costAmount" stroke="#3b82f6" strokeWidth={2} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </Card>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card><h2 className="mb-4 font-semibold">Service breakdown</h2><DataTable data={services} columns={[
