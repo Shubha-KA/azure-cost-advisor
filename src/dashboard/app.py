@@ -12,6 +12,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from src.config import get_settings
+from src.auth.entra import DelegatedTokenCredential
 from src.dashboard.chat import render_chat_interface
 from src.dashboard.components import (
     render_anomaly_panel,
@@ -20,8 +21,10 @@ from src.dashboard.components import (
     render_waste_analysis,
 )
 from src.dashboard.data_loader import DashboardDataLoader
+from src.dashboard.onboarding import require_authenticated_onboarding
 from src.dashboard.styles import inject_styles, render_header
 from src.pipeline import run_pipeline
+from src.services.multi_tenant_pipeline import MultiTenantPipelineService
 
 st.set_page_config(
     page_title="Azure Cost Optimization Advisor",
@@ -31,10 +34,10 @@ st.set_page_config(
 )
 
 
-def render_sidebar(settings) -> None:
+def render_sidebar(settings, auth_session=None) -> None:
     with st.sidebar:
         st.markdown("## ☁️")
-        st.title("Cost Advisor")
+        st.title("FinsOpsIQ")
         st.caption("AI-Powered Azure FinOps")
 
         st.divider()
@@ -49,7 +52,25 @@ def render_sidebar(settings) -> None:
         if st.button("Run Full Pipeline", type="primary", use_container_width=True):
             with st.spinner("Collecting → Processing → AI indexing…"):
                 try:
-                    run_pipeline(skip_ai=skip_ai)
+                    if auth_session is not None:
+                        service = MultiTenantPipelineService(
+                            settings,
+                            credential_factory=lambda tenant_id, subscription_id: (
+                                DelegatedTokenCredential(auth_session)
+                            ),
+                        )
+                        result = service.run_once(
+                            tenant_id=auth_session.profile.tenant_id
+                        )
+                        if any(
+                            item.status == "failed"
+                            for item in result.results
+                        ):
+                            raise RuntimeError(
+                                "One or more subscription runs failed"
+                            )
+                    else:
+                        run_pipeline(skip_ai=skip_ai)
                     st.success("Pipeline completed.")
                     st.rerun()
                 except Exception as exc:
@@ -80,7 +101,8 @@ def render_empty_state() -> None:
 def main() -> None:
     inject_styles()
     settings = get_settings()
-    render_sidebar(settings)
+    auth_session = require_authenticated_onboarding(settings)
+    render_sidebar(settings, auth_session)
 
     render_header(
         "☁️ Azure Cost Optimization Advisor",

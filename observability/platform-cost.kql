@@ -1,0 +1,4 @@
+AzureMetrics
+| where TimeGenerated > ago(30d)
+| where ResourceProvider in ("MICROSOFT.APP", "MICROSOFT.SEARCH", "MICROSOFT.SERVICEBUS", "MICROSOFT.DOCUMENTDB")
+| summarize MetricSamples=count() by ResourceProvider, Resource, bin(TimeGenerated, 1d)

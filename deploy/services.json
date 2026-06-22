@@ -1,0 +1,8 @@
+{
+  "auth-service": "src.microservices.auth_service",
+  "collection-service": "src.microservices.collection_service",
+  "processing-service": "src.microservices.processing_service",
+  "ai-service": "src.microservices.ai_service",
+  "api-gateway": "src.microservices.gateway_service",
+  "notification-service": "src.microservices.notification_service"
+}

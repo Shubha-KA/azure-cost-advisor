@@ -42,10 +42,18 @@ class SavingsEstimator:
             result.loc[unmapped, "monthly_cost"] * 0.25
         ).round(2)
 
-        total = float(result["estimated_savings"].sum())
+        totals = (
+            result[result["savings_currency"].fillna("") != ""]
+            .groupby("savings_currency")["estimated_savings"]
+            .sum()
+            .round(2)
+            .to_dict()
+            if "savings_currency" in result
+            else {}
+        )
         logger.info(
-            "Savings estimation complete: $%.2f total estimated monthly savings",
-            total,
+            "Savings estimation complete: %s total estimated monthly savings",
+            totals,
         )
         return result
 
@@ -60,8 +68,23 @@ class SavingsEstimator:
             if not flagged.empty
             else {}
         )
+        totals_by_currency = (
+            flagged[flagged["savings_currency"].fillna("") != ""]
+            .groupby("savings_currency")["estimated_savings"]
+            .sum()
+            .round(2)
+            .to_dict()
+            if not flagged.empty and "savings_currency" in flagged
+            else {}
+        )
+        totals_by_currency = {
+            currency: amount
+            for currency, amount in totals_by_currency.items()
+            if amount != 0
+        }
         return {
-            "total_estimated_savings_usd": round(float(df["estimated_savings"].sum()), 2),
+            "total_estimated_savings": totals_by_currency,
+            "total_estimated_savings_usd": totals_by_currency.get("USD", 0.0),
             "waste_resource_count": int((df["waste_level"] != "NONE").sum()),
             "savings_by_rule": by_rule,
         }

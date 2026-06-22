@@ -38,7 +38,9 @@ def test_cost_collector_exports_csv(test_settings: Settings) -> None:
     collector.collect()
     csv_path = collector.export_csv()
     df = pd.read_csv(csv_path)
-    assert "cost_usd" in df.columns
+    assert "cost_amount" in df.columns
+    assert "currency" in df.columns
+    assert "resource_id" in df.columns
     assert "Virtual Machines" in df["service_name"].values
 
 
@@ -78,6 +80,9 @@ def test_aks_collector_records_clusters(test_settings: Settings) -> None:
 
 def test_run_all_orchestration(test_settings: Settings, monkeypatch) -> None:
     monkeypatch.chdir(test_settings.project_root)
+    import src.config as config_module
+
+    monkeypatch.setattr(config_module, "_settings", test_settings)
     report = run_all(export_csv=True, continue_on_error=True)
     assert report.success_count == 5
     assert (test_settings.raw_path / "costs_latest.csv").exists()
@@ -88,6 +93,20 @@ def test_missing_mock_file_raises(test_settings: Settings, tmp_path: Path) -> No
     collector = CostCollector(test_settings)
     collector.mock_data_dir = tmp_path / "nonexistent"
     with pytest.raises((MockDataNotFoundError, CollectorError)):
+        collector.collect()
+
+
+def test_live_mode_never_uses_mock_without_credential(
+    test_settings: Settings,
+) -> None:
+    test_settings.collection_mode = "live"
+    test_settings.azure_subscription_id = ""
+    test_settings.azure_tenant_id = ""
+    test_settings.azure_client_id = ""
+    test_settings.azure_client_secret = ""
+    collector = CostCollector(test_settings)
+
+    with pytest.raises(CollectorError, match="live collection requires"):
         collector.collect()
 
 

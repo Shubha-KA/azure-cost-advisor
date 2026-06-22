@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Azure Cost Advisor AI layer")
+    parser = argparse.ArgumentParser(description="FinsOpsIQ AI layer")
     parser.add_argument(
         "--build-index",
         action="store_true",

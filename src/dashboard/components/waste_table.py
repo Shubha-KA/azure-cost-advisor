@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.dashboard import charts
 from src.dashboard.data_loader import DashboardData
+from src.money import format_money
 
 
 def render_waste_analysis(data: DashboardData) -> None:
@@ -36,7 +37,7 @@ def render_waste_analysis(data: DashboardData) -> None:
             default=list(df["resource_type"].unique()),
         )
     with filter_col3:
-        min_savings = st.number_input("Min Est. Savings ($)", min_value=0.0, value=0.0, step=5.0)
+        min_savings = st.number_input("Min Est. Savings", min_value=0.0, value=0.0, step=5.0)
 
     filtered = df[
         df["waste_level"].isin(waste_filter)
@@ -49,14 +50,29 @@ def render_waste_analysis(data: DashboardData) -> None:
     display_cols = [
         "resource_name",
         "resource_type",
-        "monthly_cost",
+        "estimated_monthly_cost",
+        "estimated_cost_currency",
+        "cost_basis",
         "cpu_avg_percent",
         "memory_avg_percent",
         "waste_level",
         "recommendation",
         "estimated_savings",
+        "savings_currency",
     ]
     styled = filtered[display_cols].copy()
+    styled["estimated_monthly_cost"] = styled.apply(
+        lambda row: format_money(
+            row["estimated_monthly_cost"], row["estimated_cost_currency"]
+        ),
+        axis=1,
+    )
+    styled["estimated_savings"] = styled.apply(
+        lambda row: format_money(
+            row["estimated_savings"], row["savings_currency"]
+        ),
+        axis=1,
+    )
     styled.columns = [c.replace("_", " ").title() for c in styled.columns]
 
     st.dataframe(
@@ -64,10 +80,8 @@ def render_waste_analysis(data: DashboardData) -> None:
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Monthly Cost": st.column_config.NumberColumn(format="$%.2f"),
             "Cpu Avg Percent": st.column_config.NumberColumn(format="%.1f%%"),
             "Memory Avg Percent": st.column_config.NumberColumn(format="%.1f%%"),
-            "Estimated Savings": st.column_config.NumberColumn(format="$%.2f"),
         },
     )
 

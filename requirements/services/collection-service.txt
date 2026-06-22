@@ -1,0 +1,10 @@
+-r base.txt
+azure-mgmt-costmanagement==4.0.1
+azure-mgmt-consumption==10.0.0
+azure-mgmt-resource==23.2.0
+azure-mgmt-advisor==9.0.1
+azure-mgmt-monitor==7.0.0
+azure-mgmt-compute==38.0.0
+azure-mgmt-containerservice==41.3.0
+azure-mgmt-resourcegraph==8.0.1
+requests>=2.33.0,<3

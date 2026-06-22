@@ -1,0 +1,13 @@
+{{- $namespaces := dict -}}
+{{- range $name, $service := .Values.services -}}
+{{- $_ := set $namespaces $service.namespace true -}}
+{{- end -}}
+{{- range $namespace, $_ := $namespaces }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace }}
+  labels:
+    {{- include "finops.labels" $ | nindent 4 }}
+{{- end }}

@@ -1,0 +1,92 @@
+# .github/workflows/platform-deploy.yml
+---
+name: "Infrastructure Deployment"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: string
+        required: true
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: "Deploy Platform"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Bootstrap - Initialize
+        run: terraform -chdir=infra/bootstrap init -backend=false
+
+      - name: Bootstrap - Import Existing Resources
+        run: |
+          chmod +x .github/scripts/import-bootstrap.sh
+          bash .github/scripts/import-bootstrap.sh
+
+      - name: Bootstrap - Validate
+        run: terraform -chdir=infra/bootstrap validate
+
+      - name: Bootstrap - Plan
+        run: |
+          terraform -chdir=infra/bootstrap plan \
+            -var-file=environments/platform.tfvars \
+            -out=bootstrap.tfplan
+
+      - name: Bootstrap - Apply
+        run: terraform -chdir=infra/bootstrap apply -auto-approve bootstrap.tfplan
+
+      - name: Export bootstrap outputs and generate backend config
+        run: |
+          terraform -chdir=infra/bootstrap output -json > bootstrap-outputs.json
+          RG_NAME=$(jq -r .resource_group_name.value bootstrap-outputs.json)
+          SA_NAME=$(jq -r .storage_account_name.value bootstrap-outputs.json)
+          cat <<EOF > infra/dev/backend.dev.hcl
+          resource_group_name  = "$RG_NAME"
+          storage_account_name = "$SA_NAME"
+          container_name       = "tfstate"
+          key                  = "dev/aks-platform.tfstate"
+          use_azuread_auth     = true
+          EOF
+
+      - name: Platform - Initialize
+        run: terraform -chdir=infra/dev init -reconfigure -backend-config=backend.dev.hcl
+
+      - name: Platform - Validate
+        run: terraform -chdir=infra/dev validate
+
+      - name: Platform - Plan
+        run: |
+          terraform -chdir=infra/dev plan \
+            -var-file=environments/dev.tfvars \
+            -out=dev.tfplan
+
+      - name: Platform - Apply
+        run: terraform -chdir=infra/dev apply -auto-approve dev.tfplan

@@ -10,6 +10,7 @@ import streamlit as st
 from src.ai.advisor import FinOpsAdvisor
 from src.config import Settings
 from src.dashboard.data_loader import DashboardData
+from src.money import format_money
 
 
 def render_recommendation_cards(
@@ -75,10 +76,12 @@ def _extract_recommendation_cards(
                     "title": f"{row['resource_name']} ({row['resource_type']})",
                     "body": row.get("recommendation", "") or "Review and remediate this resource.",
                     "savings": float(row.get("estimated_savings", 0)),
+                    "currency": str(row.get("savings_currency", "")),
                     "level": str(row.get("waste_level", "MEDIUM")).lower(),
                     "metrics": (
                         f"CPU: {row.get('cpu_avg_percent', 0):.1f}% | "
-                        f"Cost: ${row.get('monthly_cost', 0):.2f}/mo"
+                        f"Cost: {format_money(row.get('estimated_monthly_cost', row.get('monthly_cost', 0)), row.get('estimated_cost_currency', ''))}/mo "
+                        f"({row.get('cost_basis', 'unknown')})"
                     ),
                 }
             )
@@ -126,6 +129,7 @@ def _render_card(card: dict) -> None:
     body_md = card.get("body", "")
     metrics_md = card.get("metrics", "")
     savings = card.get("savings", 0)
+    currency = card.get("currency", "")
     # Assemble parts
     parts = [title_md]
     if body_md:
@@ -133,7 +137,9 @@ def _render_card(card: dict) -> None:
     if metrics_md:
         parts.append(metrics_md)
     if savings > 0:
-        parts.append(f"**Estimated savings:** ${savings:,.0f}/month")
+        parts.append(
+            f"**Estimated savings:** {format_money(savings, currency)}/month"
+        )
     # Add a level badge as plain text
     parts.append(f"*Level: {level.upper()}*")
     md_content = "\n\n".join(parts)

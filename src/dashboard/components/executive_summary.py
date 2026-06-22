@@ -6,6 +6,7 @@ import streamlit as st
 
 from src.dashboard import charts
 from src.dashboard.data_loader import DashboardData
+from src.money import format_money_totals
 
 
 def render_executive_summary(data: DashboardData) -> None:
@@ -13,16 +14,14 @@ def render_executive_summary(data: DashboardData) -> None:
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(
-        "Total Monthly Cost",
-        f"${data.total_monthly_cost:,.2f}",
-        help="Aggregated monthly spend from processed cost data",
+        "Total Cost (Collected Period)",
+        format_money_totals(data.total_costs) or "N/A",
+        help="Azure Cost Management spend for the collected lookback period",
     )
     col2.metric(
         "Est. Monthly Savings",
-        f"${data.total_savings:,.2f}",
-        delta=f"{data.total_savings / max(data.total_monthly_cost, 1) * 100:.1f}% of spend"
-        if data.total_monthly_cost > 0
-        else None,
+        format_money_totals(data.savings_totals) or "N/A",
+        delta=None,
         delta_color="inverse",
     )
     col3.metric(

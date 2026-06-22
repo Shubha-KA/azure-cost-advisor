@@ -1,4 +1,4 @@
-"""Azure Resource Graph collector for disks and public IPs (mock-simulated)."""
+"""Azure Resource Graph inventory collector with labeled cost estimates."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ class ResourceGraphCollector(BaseCollector[Any]):
     mock_filename = "resource_graph_inventory.json"
     schema_model = dict  # type: ignore[assignment]
     output_prefix = "resource_graph"
+    allow_mock_fallback = False
 
     def _load_mock_json(self) -> dict[str, Any]:
         disks_path = self.mock_data_dir / "unattached_disks.json"
@@ -90,9 +91,9 @@ class ResourceGraphCollector(BaseCollector[Any]):
         from azure.mgmt.resourcegraph import ResourceGraphClient
         from azure.mgmt.resourcegraph.models import QueryRequest
 
-        credential = get_azure_credential()
+        credential = self.credential or get_azure_credential()
         client = ResourceGraphClient(credential)
-        sub_id = self.settings.azure_subscription_id
+        sub_id = self.context.subscription_id
         subs = [sub_id]
 
         # 1. Unattached Disks
@@ -105,20 +106,30 @@ class ResourceGraphCollector(BaseCollector[Any]):
         disks_res = client.resources(QueryRequest(subscriptions=subs, query=disks_q))
         disks_data = []
         for d in disks_res.data:
-            d["daysUnattached"] = 30  # Simulate since ARG doesn't expose it directly
+            d["daysUnattached"] = 30
             d["monthlyCostEstimateUsd"] = float(d.get("diskSizeGb", 0)) * 0.15
+            d["costBasis"] = "synthetic"
+            d["costEstimateCurrency"] = "USD"
+            d["costEstimateMethod"] = "disk_size_gb_x_0.15_usd"
             disks_data.append(d)
 
         # 2. Public IPs
         ips_q = """
         Resources 
         | where type =~ 'microsoft.network/publicipaddresses' 
-        | project name, resourceGroup, location, ipAddress=tostring(properties.ipAddress), allocationMethod=tostring(properties.publicIPAllocationMethod), sku=tostring(sku.name), associated=isnotempty(properties.ipConfiguration), associatedResource=tostring(properties.ipConfiguration.id)
+        | project id, name, resourceGroup, location, ipAddress=tostring(properties.ipAddress), allocationMethod=tostring(properties.publicIPAllocationMethod), sku=tostring(sku.name), associated=isnotempty(properties.ipConfiguration), associatedResource=tostring(properties.ipConfiguration.id)
         """
         ips_res = client.resources(QueryRequest(subscriptions=subs, query=ips_q))
         ips_data = []
         for ip in ips_res.data:
             ip["monthlyCostEstimateUsd"] = 3.65 if not ip["associated"] else 0.0
+            ip["costBasis"] = "synthetic" if not ip["associated"] else "unknown"
+            ip["costEstimateCurrency"] = "USD" if not ip["associated"] else ""
+            ip["costEstimateMethod"] = (
+                "flat_3.65_usd_unassociated_public_ip"
+                if not ip["associated"]
+                else ""
+            )
             ips_data.append(ip)
 
         # 3. Inventory
@@ -172,5 +183,7 @@ class ResourceGraphCollector(BaseCollector[Any]):
                     ),
                     2,
                 ),
+                "costBasis": "synthetic",
+                "costEstimateCurrency": "USD",
             },
         }

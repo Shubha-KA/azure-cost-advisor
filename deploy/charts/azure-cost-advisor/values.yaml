@@ -1,0 +1,243 @@
+global:
+  keyVault:
+    name: ""
+    tenantId: ""
+    mountPath: /mnt/secrets-store
+  ingress:
+    enabled: true
+    className: azure-application-gateway
+    hostname: ""
+    sslCertificateName: ""
+    sslRedirect: false
+
+services:
+  frontend:
+    namespace: finops-edge
+    serviceAccount: frontend
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: node server.js
+    keyVaultObjects:
+      FRONTEND_URL: frontend-url
+    port: 3000
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      cpuUtilization: 70
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits: { cpu: 500m, memory: 512Mi }
+  api-gateway:
+    namespace: finops-edge
+    serviceAccount: api-gateway
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: uvicorn src.microservices.gateway_service:app --host 0.0.0.0 --port 8000
+    keyVaultObjects:
+      STORAGE_PROVIDER: storage-provider
+      COSMOS_ENDPOINT: cosmos-endpoint
+      COSMOS_DATABASE: cosmos-database
+      AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+      AZURE_STORAGE_CONTAINER: azure-storage-container
+      USE_MANAGED_IDENTITY: use-managed-identity
+      APPLICATIONINSIGHTS_CONNECTION_STRING: applicationinsights-connection-string
+      AUTH_MODE: auth-mode
+      API_SESSION_SECRET: api-session-secret
+      INTERNAL_API_AUDIENCE: internal-api-audience
+      AUTH_SERVICE_URL: auth-service-url
+      COLLECTION_SERVICE_URL: collection-service-url
+      PROCESSING_SERVICE_URL: processing-service-url
+      AI_SERVICE_URL: ai-service-url
+      NOTIFICATION_SERVICE_URL: notification-service-url
+    port: 8000
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      cpuUtilization: 70
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 750m, memory: 768Mi }
+  auth-service:
+    namespace: finops-auth
+    serviceAccount: auth-service
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: uvicorn src.microservices.auth_service:app --host 0.0.0.0 --port 8000
+    keyVaultObjects:
+      STORAGE_PROVIDER: storage-provider
+      COSMOS_ENDPOINT: cosmos-endpoint
+      COSMOS_DATABASE: cosmos-database
+      AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+      AZURE_STORAGE_CONTAINER: azure-storage-container
+      USE_MANAGED_IDENTITY: use-managed-identity
+      APPLICATIONINSIGHTS_CONNECTION_STRING: applicationinsights-connection-string
+      AUTH_MODE: auth-mode
+      ENTRA_CLIENT_ID: entra-client-id
+      ENTRA_CLIENT_SECRET: entra-client-secret
+      ENTRA_AUTHORITY: entra-authority
+      ENTRA_REDIRECT_URI: entra-redirect-uri
+      ENTRA_POST_LOGOUT_REDIRECT_URI: entra-post-logout-redirect-uri
+      API_SESSION_SECRET: api-session-secret
+      API_SESSION_COOKIE_SECURE: api-session-cookie-secure
+      FRONTEND_URL: frontend-url
+      EVENT_PROVIDER: event-provider
+      SERVICE_BUS_NAMESPACE: service-bus-namespace
+      SERVICE_BUS_TOPIC: service-bus-topic
+      INTERNAL_API_AUDIENCE: internal-api-audience
+    env:
+      COLLECTION_SERVICE_URL: http://collection-service.finops-collection.svc.cluster.local:8000
+    port: 8000
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      cpuUtilization: 70
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 768Mi }
+  collection-service:
+    namespace: finops-collection
+    serviceAccount: collection-service
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: uvicorn src.microservices.collection_service:app --host 0.0.0.0 --port 8000
+    keyVaultObjects:
+      STORAGE_PROVIDER: storage-provider
+      COSMOS_ENDPOINT: cosmos-endpoint
+      COSMOS_DATABASE: cosmos-database
+      AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+      AZURE_STORAGE_CONTAINER: azure-storage-container
+      USE_MANAGED_IDENTITY: use-managed-identity
+      APPLICATIONINSIGHTS_CONNECTION_STRING: applicationinsights-connection-string
+      AUTH_MODE: auth-mode
+      EVENT_PROVIDER: event-provider
+      SERVICE_BUS_NAMESPACE: service-bus-namespace
+      SERVICE_BUS_TOPIC: service-bus-topic
+      COLLECTION_ENTRA_CLIENT_ID: collection-entra-client-id
+      COLLECTION_MODE: collection-mode
+      COLLECTION_SCHEDULER_ENABLED: collection-scheduler-enabled
+      COLLECTION_INTERVAL_MINUTES: collection-interval-minutes
+      INTERNAL_API_AUDIENCE: internal-api-audience
+    port: 8000
+    replicas: 1
+    autoscaling:
+      enabled: false
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+  processing-service:
+    namespace: finops-processing
+    serviceAccount: processing-service
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: uvicorn src.microservices.processing_service:app --host 0.0.0.0 --port 8000
+    keyVaultObjects:
+      STORAGE_PROVIDER: storage-provider
+      COSMOS_ENDPOINT: cosmos-endpoint
+      COSMOS_DATABASE: cosmos-database
+      AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+      AZURE_STORAGE_CONTAINER: azure-storage-container
+      USE_MANAGED_IDENTITY: use-managed-identity
+      APPLICATIONINSIGHTS_CONNECTION_STRING: applicationinsights-connection-string
+      AUTH_MODE: auth-mode
+      EVENT_PROVIDER: event-provider
+      SERVICE_BUS_NAMESPACE: service-bus-namespace
+      SERVICE_BUS_TOPIC: service-bus-topic
+      INTERNAL_API_AUDIENCE: internal-api-audience
+    port: 8000
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      cpuUtilization: 70
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+  ai-service:
+    namespace: finops-ai
+    serviceAccount: ai-service
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: uvicorn src.microservices.ai_service:app --host 0.0.0.0 --port 8000
+    keyVaultObjects:
+      STORAGE_PROVIDER: storage-provider
+      COSMOS_ENDPOINT: cosmos-endpoint
+      COSMOS_DATABASE: cosmos-database
+      AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+      AZURE_STORAGE_CONTAINER: azure-storage-container
+      USE_MANAGED_IDENTITY: use-managed-identity
+      APPLICATIONINSIGHTS_CONNECTION_STRING: applicationinsights-connection-string
+      AUTH_MODE: auth-mode
+      EVENT_PROVIDER: event-provider
+      SERVICE_BUS_NAMESPACE: service-bus-namespace
+      SERVICE_BUS_TOPIC: service-bus-topic
+      COLLECTION_ENTRA_CLIENT_ID: collection-entra-client-id
+      SEARCH_PROVIDER: search-provider
+      AZURE_SEARCH_ENDPOINT: azure-search-endpoint
+      AZURE_SEARCH_INDEX_NAME: azure-search-index-name
+      AZURE_SEARCH_SEMANTIC_CONFIG: azure-search-semantic-config
+      AZURE_SEARCH_VECTOR_DIMENSIONS: azure-search-vector-dimensions
+      AZURE_OPENAI_ENDPOINT: azure-openai-endpoint
+      AZURE_OPENAI_API_VERSION: azure-openai-api-version
+      AZURE_OPENAI_DEPLOYMENT_NAME: azure-openai-deployment-name
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: azure-openai-embedding-deployment
+      INTERNAL_API_AUDIENCE: internal-api-audience
+    port: 8000
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      cpuUtilization: 70
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1536Mi }
+  notification-service:
+    namespace: finops-notification
+    serviceAccount: notification-service
+    workloadIdentityClientId: ""
+    image:
+      repository: ""
+      tag: latest
+    command: uvicorn src.microservices.notification_service:app --host 0.0.0.0 --port 8000
+    keyVaultObjects:
+      STORAGE_PROVIDER: storage-provider
+      COSMOS_ENDPOINT: cosmos-endpoint
+      COSMOS_DATABASE: cosmos-database
+      AZURE_STORAGE_ACCOUNT_URL: azure-storage-account-url
+      AZURE_STORAGE_CONTAINER: azure-storage-container
+      USE_MANAGED_IDENTITY: use-managed-identity
+      APPLICATIONINSIGHTS_CONNECTION_STRING: applicationinsights-connection-string
+      AUTH_MODE: auth-mode
+      EVENT_PROVIDER: event-provider
+      SERVICE_BUS_NAMESPACE: service-bus-namespace
+      SERVICE_BUS_TOPIC: service-bus-topic
+      INTERNAL_API_AUDIENCE: internal-api-audience
+    port: 8000
+    replicas: 1
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      cpuUtilization: 70
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: 500m, memory: 512Mi }

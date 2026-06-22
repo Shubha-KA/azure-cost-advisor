@@ -24,5 +24,8 @@ def test_pipeline_skip_ai(test_settings: Settings, monkeypatch) -> None:
     monkeypatch.setattr(config_module, "_settings", test_settings)
 
     result = run_pipeline(skip_ai=True)
-    assert result["summary"]["total_cost_usd"] > 0
+    assert sum(result["summary"]["total_cost"].values()) > 0
+    assert result["summary"]["cost_reconciliation"]["status"] == "passed"
+    assert result["summary"]["cost_fact_count"] > 0
+    assert (test_settings.processed_path / "cost_facts_latest.csv").exists()
     assert (test_settings.processed_path / "summary_latest.json").exists()

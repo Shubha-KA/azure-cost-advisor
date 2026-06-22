@@ -5,9 +5,11 @@ from __future__ import annotations
 import streamlit as st
 
 from src.ai.advisor import FinOpsAdvisor
+from src.auth.entra import AuthSession, DelegatedTokenCredential
 from src.ai.prompts import EXAMPLE_QUESTIONS
 from src.config import Settings
 from src.dashboard.data_loader import DashboardData
+from src.storage.factory import create_storage_provider
 
 
 def init_chat_state() -> None:
@@ -24,8 +26,16 @@ def render_chat_interface(data: DashboardData, settings: Settings) -> None:
 
     st.markdown('<p class="section-title">FinOps Assistant</p>', unsafe_allow_html=True)
 
-    mode = "Azure OpenAI + FAISS RAG" if settings.openai_configured else "Rule-based (offline)"
-    faiss_note = "indexed" if data.faiss_ready else "not indexed — run pipeline or Rebuild FAISS"
+    mode = (
+        f"Azure OpenAI + {settings.search_provider}"
+        if settings.openai_configured
+        else "Rule-based (offline)"
+    )
+    faiss_note = (
+        "Azure AI Search"
+        if settings.search_provider == "azure_ai_search"
+        else "FAISS development fallback"
+    )
     st.markdown(
         f'<div class="chat-hint">'
         f'<strong>Mode:</strong> {mode} | <strong>Knowledge base:</strong> {faiss_note}<br>'
@@ -67,7 +77,23 @@ def _handle_message(prompt: str, settings: Settings) -> None:
         for m in st.session_state.chat_messages[:-1][-8:]
     )
 
-    advisor = FinOpsAdvisor(settings)
+    advisor_kwargs = {}
+    auth_payload = st.session_state.get("entra_auth_session")
+    if auth_payload:
+        session = AuthSession.model_validate(auth_payload)
+        subscriptions = [
+            item.subscription_id
+            for item in create_storage_provider(settings).subscriptions.list(
+                session.profile.tenant_id
+            )
+            if item.selected and item.onboarding_status == "validated"
+        ]
+        advisor_kwargs = {
+            "tenant_id": session.profile.tenant_id,
+            "subscription_ids": subscriptions,
+            "credential": DelegatedTokenCredential(session),
+        }
+    advisor = FinOpsAdvisor(settings, **advisor_kwargs)
     with st.spinner("Analyzing with FinOps Advisor…"):
         response = advisor.ask(prompt, chat_history=history)
 

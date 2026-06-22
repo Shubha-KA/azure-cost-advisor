@@ -1,0 +1,21 @@
+global:
+  ingress:
+    hostname: "vkcolors.shop"
+    sslCertificateName: "agw-tls"
+    sslRedirect: true
+
+services:
+  frontend:
+    image: { repository: REPLACE_ACR/frontend, tag: REPLACE_TAG }
+  api-gateway:
+    image: { repository: REPLACE_ACR/api-gateway, tag: REPLACE_TAG }
+  auth-service:
+    image: { repository: REPLACE_ACR/auth-service, tag: REPLACE_TAG }
+  collection-service:
+    image: { repository: REPLACE_ACR/collection-service, tag: REPLACE_TAG }
+  processing-service:
+    image: { repository: REPLACE_ACR/processing-service, tag: REPLACE_TAG }
+  ai-service:
+    image: { repository: REPLACE_ACR/ai-service, tag: REPLACE_TAG }
+  notification-service:
+    image: { repository: REPLACE_ACR/notification-service, tag: REPLACE_TAG }

@@ -1,0 +1,7 @@
+traces
+| where message has_any ("ai_execution", "operation_duration operation=ai_chat", "search_index_summary")
+| summarize Executions=count(),
+    PromptTokens=sum(toint(customDimensions.promptTokens)),
+    CompletionTokens=sum(toint(customDimensions.completionTokens)),
+    P95LatencyMs=percentile(todouble(customDimensions.latencyMs), 95)
+    by bin(timestamp, 1h), tostring(customDimensions.model)

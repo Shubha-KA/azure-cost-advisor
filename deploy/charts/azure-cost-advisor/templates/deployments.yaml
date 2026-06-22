@@ -1,0 +1,79 @@
+{{- range $name, $service := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $service.namespace }}
+  labels:
+    {{- include "finops.labels" $ | nindent 4 }}
+    {{- include "finops.selectorLabels" (dict "name" $name) | nindent 4 }}
+spec:
+  replicas: {{ $service.replicas }}
+  selector:
+    matchLabels:
+      {{- include "finops.selectorLabels" (dict "name" $name) | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  template:
+    metadata:
+      labels:
+        {{- include "finops.selectorLabels" (dict "name" $name) | nindent 8 }}
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: {{ $service.serviceAccount }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $name }}
+          image: "{{ required (printf "image.repository is required for %s" $name) $service.image.repository }}:{{ required (printf "image.tag is required for %s" $name) $service.image.tag }}"
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              {{- include "finops.exportScript" (dict "Values" $.Values "service" $service) | nindent 14 }}
+          ports:
+            - name: http
+              containerPort: {{ $service.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: {{ if eq $name "frontend" }}/{{ else }}/health/ready{{ end }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: {{ if eq $name "frontend" }}/{{ else }}/health/live{{ end }}
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml $service.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: keyvault
+              mountPath: {{ $.Values.global.keyVault.mountPath }}
+              readOnly: true
+      volumes:
+        - name: keyvault
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "finops.secretProviderClassName" (dict "name" $name) }}
+{{- end }}

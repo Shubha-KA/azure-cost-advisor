@@ -1,0 +1,2 @@
+-r base.txt
+azure-communication-email>=1.0.0,<2

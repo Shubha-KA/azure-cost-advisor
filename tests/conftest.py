@@ -19,13 +19,19 @@ from src.config import Settings
 def test_settings(tmp_path: Path) -> Settings:
     return Settings(
         _env_file=None,
-        data_raw_dir=str(tmp_path / "raw"),
-        data_processed_dir=str(tmp_path / "processed"),
-        data_embeddings_dir=str(tmp_path / "embeddings"),
-        cost_lookback_days=14,
-        anomaly_zscore_threshold=2.0,
-        waste_idle_cpu_threshold=5.0,
-        waste_min_monthly_cost=5.0,
+        AZURE_SUBSCRIPTION_ID="",
+        AZURE_TENANT_ID="",
+        AZURE_CLIENT_ID="",
+        AZURE_CLIENT_SECRET="",
+        AZURE_OPENAI_ENDPOINT="",
+        AZURE_OPENAI_API_KEY="",
+        DATA_RAW_DIR=str(tmp_path / "raw"),
+        DATA_PROCESSED_DIR=str(tmp_path / "processed"),
+        DATA_EMBEDDINGS_DIR=str(tmp_path / "embeddings"),
+        COST_LOOKBACK_DAYS=14,
+        ANOMALY_ZSCORE_THRESHOLD=2.0,
+        WASTE_IDLE_CPU_THRESHOLD=5.0,
+        WASTE_MIN_MONTHLY_COST=5.0,
     )
 
 

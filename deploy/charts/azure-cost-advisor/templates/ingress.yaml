@@ -1,0 +1,66 @@
+{{- if .Values.global.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: frontend
+  namespace: finops-edge
+  annotations:
+    appgw.ingress.kubernetes.io/health-probe-path: /
+    {{- if .Values.global.ingress.sslCertificateName }}
+    appgw.ingress.kubernetes.io/ssl-redirect: {{ .Values.global.ingress.sslRedirect | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.global.ingress.className }}
+  rules:
+    - {{- if .Values.global.ingress.hostname }}
+      host: {{ .Values.global.ingress.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  name: http
+    {{- if .Values.global.ingress.sslCertificateName }}
+  tls:
+    - hosts:
+        - {{ .Values.global.ingress.hostname | quote }}
+      secretName: {{ .Values.global.ingress.sslCertificateName | quote }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway
+  namespace: finops-edge
+  annotations:
+    appgw.ingress.kubernetes.io/health-probe-path: /health/ready
+    {{- if .Values.global.ingress.sslCertificateName }}
+    appgw.ingress.kubernetes.io/ssl-redirect: {{ .Values.global.ingress.sslRedirect | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.global.ingress.className }}
+  rules:
+    - {{- if .Values.global.ingress.hostname }}
+      host: {{ .Values.global.ingress.hostname | quote }}
+      {{- end }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  name: http
+    {{- if .Values.global.ingress.sslCertificateName }}
+  tls:
+    - hosts:
+        - {{ .Values.global.ingress.hostname | quote }}
+      secretName: {{ .Values.global.ingress.sslCertificateName | quote }}
+    {{- end }}
+{{- end }}

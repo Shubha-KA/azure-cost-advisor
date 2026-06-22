@@ -1,0 +1,45 @@
+environment:
+  name: prod
+  namespace: finopsiq-prod
+
+config:
+  secretName: finopsiq-prod-app-config
+
+ingress:
+  enabled: true
+  className: azure-application-gateway
+  hostname: ""
+  sslCertificateName: ""
+  sslRedirect: true
+
+services:
+  frontend:
+    image:
+      repository: ""
+      tag: prod
+    env:
+      NEXT_PUBLIC_API_URL: ""
+  apiGateway:
+    image:
+      repository: ""
+      tag: prod
+  auth:
+    image:
+      repository: ""
+      tag: prod
+  collection:
+    image:
+      repository: ""
+      tag: prod
+  processing:
+    image:
+      repository: ""
+      tag: prod
+  ai:
+    image:
+      repository: ""
+      tag: prod
+  notification:
+    image:
+      repository: ""
+      tag: prod

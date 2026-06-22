@@ -1,0 +1,4 @@
+traces
+| where message startswith "operation_duration operation=collection"
+| summarize Runs=count(), P95DurationMs=percentile(todouble(customDimensions.durationMs), 95)
+    by bin(timestamp, 1h)

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: {{ .Values.environment.namespace | quote }}
+  labels:
+    app.kubernetes.io/name: finopsiq
+    app.kubernetes.io/component: api-gateway
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: finopsiq
+      app.kubernetes.io/component: api-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: finopsiq
+        app.kubernetes.io/component: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: "{{ required "services.apiGateway.image.repository is required" .Values.services.apiGateway.image.repository }}:{{ .Values.services.apiGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.services.apiGateway.port }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.config.secretName | quote }}
+          env:
+            - name: SERVICE_MODULE
+              value: {{ .Values.services.apiGateway.serviceModule | quote }}
+            - name: USE_MANAGED_IDENTITY
+              value: "true"
+            - name: AUTH_SERVICE_URL
+              value: {{ .Values.config.serviceUrls.authServiceUrl | quote }}
+            - name: COLLECTION_SERVICE_URL
+              value: {{ .Values.config.serviceUrls.collectionServiceUrl | quote }}
+            - name: PROCESSING_SERVICE_URL
+              value: {{ .Values.config.serviceUrls.processingServiceUrl | quote }}
+            - name: AI_SERVICE_URL
+              value: {{ .Values.config.serviceUrls.aiServiceUrl | quote }}
+            - name: NOTIFICATION_SERVICE_URL
+              value: {{ .Values.config.serviceUrls.notificationServiceUrl | quote }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+              memory: {{ .Values.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+              memory: {{ .Values.resources.limits.memory | quote }}
