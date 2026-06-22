@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { loginUrl } from "@/lib/api";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   const handleSignIn = () => {
     setLoading(true);
-    window.location.href = "/api/auth/login";
+    window.location.href = loginUrl;
   };
 
   return (

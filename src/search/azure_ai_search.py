@@ -40,7 +40,7 @@ class AzureAISearchProvider:
         embeddings=None,
     ) -> None:
         self.settings = settings
-        if settings.use_managed_identity and not settings.azure_search_api_key:
+        if not settings.azure_search_api_key:
             from azure.identity import DefaultAzureCredential
 
             credential = DefaultAzureCredential()
@@ -235,6 +235,7 @@ class AzureAISearchProvider:
                     "sourceSystem": row["sourceSystem"],
                     "schemaVersion": row["schemaVersion"],
                     "documentType": row["documentType"],
+                    "title": row["title"],
                     **json.loads(row.get("metadataJson") or "{}"),
                 },
             )

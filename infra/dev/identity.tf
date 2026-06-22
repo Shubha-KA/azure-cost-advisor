@@ -42,7 +42,7 @@ resource "azuread_application_password" "login" {
 
 resource "azuread_application" "collection" {
   display_name     = "azure-cost-advisor-${var.environment}-collection"
-  sign_in_audience = "AzureADMultipleOrgs"
+  sign_in_audience = "AzureADandPersonalMicrosoftAccount"
   owners           = [data.azuread_client_config.current.object_id]
 }
 
@@ -55,7 +55,7 @@ resource "random_uuid" "internal_api_access" {}
 
 resource "azuread_application" "internal_api" {
   display_name     = "azure-cost-advisor-${var.environment}-internal-api"
-  sign_in_audience = "AzureADMyOrg"
+  sign_in_audience = "AzureADandPersonalMicrosoftAccount"
   owners           = [data.azuread_client_config.current.object_id]
 
   app_role {

@@ -1,0 +1,92 @@
+environment:
+  name: dev
+  namespace: finopsiq-dev
+
+imagePullPolicy: IfNotPresent
+
+workloadIdentity:
+  enabled: true
+  tenantId: ""
+
+config:
+  secretName: finopsiq-app-config
+  keyVaultName: ""
+  serviceUrls:
+    authServiceUrl: http://auth-service:8000
+    collectionServiceUrl: http://collection-service:8000
+    processingServiceUrl: http://processing-service:8000
+    aiServiceUrl: http://ai-service:8000
+    notificationServiceUrl: http://notification-service:8000
+
+ingress:
+  enabled: true
+  className: azure-application-gateway
+  hostname: ""
+  sslCertificateName: ""
+  sslRedirect: false
+
+replicas: 2
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 500Mi
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 5
+  cpuUtilization: 70
+  memoryUtilization: 80
+
+services:
+  frontend:
+    image:
+      repository: ""
+      tag: latest
+    port: 3000
+    env:
+      NEXT_PUBLIC_API_URL: ""
+  apiGateway:
+    image:
+      repository: ""
+      tag: latest
+    port: 8000
+    serviceModule: src.microservices.gateway_service
+  auth:
+    image:
+      repository: ""
+      tag: latest
+    serviceAccountClientId: ""
+    port: 8000
+    serviceModule: src.microservices.auth_service
+  collection:
+    image:
+      repository: ""
+      tag: latest
+    serviceAccountClientId: ""
+    port: 8000
+    serviceModule: src.microservices.collection_service
+  processing:
+    image:
+      repository: ""
+      tag: latest
+    serviceAccountClientId: ""
+    port: 8000
+    serviceModule: src.microservices.processing_service
+  ai:
+    image:
+      repository: ""
+      tag: latest
+    serviceAccountClientId: ""
+    port: 8000
+    serviceModule: src.microservices.ai_service
+  notification:
+    image:
+      repository: ""
+      tag: latest
+    serviceAccountClientId: ""
+    port: 8000
+    serviceModule: src.microservices.notification_service

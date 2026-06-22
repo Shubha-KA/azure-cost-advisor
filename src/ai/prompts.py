@@ -70,6 +70,36 @@ RECOMMENDATIONS_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
+HYBRID_COPILOT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            FINOPS_SYSTEM_PROMPT
+            + "\nYou are a hybrid Azure FinOps Copilot. Combine structured "
+            "subscription facts from Cosmos DB with retrieved knowledge and "
+            "advisory documents from Azure AI Search. Prefer exact customer "
+            "costs, resource names, utilization signals, and recommendations "
+            "from structured facts. Use retrieved knowledge to explain causes, "
+            "tradeoffs, and next steps. Do not expose internal repository names, "
+            "routing metadata, document IDs, or debug details in the user answer.",
+        ),
+        (
+            "human",
+            "User question: {input}\n\n"
+            "Structured subscription facts:\n{structured_facts}\n\n"
+            "Retrieved advisory knowledge:\n{search_context}\n\n"
+            "Conversation history:\n{chat_history}\n\n"
+            "Write a grounded FinOps consultant response with:\n"
+            "1. Executive diagnosis\n"
+            "2. Evidence from this subscription\n"
+            "3. Likely root causes\n"
+            "4. Recommended actions\n"
+            "5. Estimated savings or what is needed to quantify savings\n\n"
+            "Use only facts present in the structured facts or retrieved knowledge.",
+        ),
+    ]
+)
+
 FINOPS_RECOMMENDATION_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages(
     [
         (

@@ -31,8 +31,8 @@ def callback(request: Request):
 
 
 @app.get("/api/auth/logout")
-def logout():
-    return app.state.application.logout()
+def logout(request: Request):
+    return app.state.application.logout_request(request)
 
 
 @app.get("/api/auth/me")

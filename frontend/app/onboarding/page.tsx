@@ -152,11 +152,6 @@ export default function Onboarding() {
 
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center bg-muted/30 p-4">
-      <div className="absolute right-4 top-4">
-        <Button className="border border-input bg-transparent text-foreground hover:bg-accent hover:text-accent-foreground" onClick={() => window.location.href = "/api/auth/logout"}>
-          Sign Out
-        </Button>
-      </div>
       <Card className="w-full max-w-3xl p-8 shadow-lg">
         <h1 className="mb-2 text-3xl font-bold tracking-tight">Welcome to FinsOpsIQ</h1>
         <p className="mb-8 text-muted-foreground">Let's get your account set up by onboarding your Azure subscriptions.</p>

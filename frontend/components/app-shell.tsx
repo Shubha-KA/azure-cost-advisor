@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useScope } from "@/components/scope-provider";
+import { api, logoutUrl } from "@/lib/api";
 
 const links = [
   ["/dashboard", "Dashboard", LayoutDashboard],
@@ -26,6 +27,14 @@ const links = [
   ["/assistant", "AI assistant", Bot],
   ["/admin", "Administration", Settings],
 ] as const;
+
+type CurrentUser = {
+  tenant_id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  roles: string[];
+};
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -41,10 +50,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const { theme, setTheme } = useTheme();
   useEffect(() => { setMounted(true); }, []);
   const { scope, tenants, subscriptions, setTenant, setSubscription } =
     useScope();
+  useEffect(() => {
+    api<CurrentUser>("/api/auth/me")
+      .then((user) => {
+        setCurrentUser(user);
+        const prior = localStorage.getItem("currentUserId");
+        if (prior && prior !== user.user_id) {
+          localStorage.removeItem("tenantId");
+          localStorage.removeItem("subscriptionId");
+        }
+        localStorage.setItem("currentUserId", user.user_id);
+      })
+      .catch(() => setCurrentUser(null));
+  }, []);
+  const primaryRole = currentUser?.roles?.[0]?.replace(/_/g, " ") || "user";
   return (
     <div className="min-h-screen bg-background text-foreground">
       <aside className="fixed inset-y-0 hidden w-64 border-r bg-card p-5 lg:block">
@@ -97,9 +121,19 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               ))}
             </select>
           )}
+          {currentUser && (
+            <div className="ml-auto hidden min-w-0 max-w-xs flex-col text-right md:flex">
+              <span className="truncate text-sm font-medium">
+                {currentUser.display_name || currentUser.email}
+              </span>
+              <span className="truncate text-xs text-muted-foreground">
+                {currentUser.email} · {primaryRole}
+              </span>
+            </div>
+          )}
           <button
             aria-label="Toggle theme"
-            className="ml-auto rounded-lg border p-2"
+            className={cn("rounded-lg border p-2", !currentUser && "ml-auto")}
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
             <div className="h-[18px] w-[18px]">
@@ -109,7 +143,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
           <button
             aria-label="Sign out"
             className="rounded-lg border p-2 text-muted-foreground hover:bg-muted"
-            onClick={() => window.location.href = "/api/auth/logout"}
+            onClick={() => window.location.href = logoutUrl}
             title="Sign Out"
           >
             <LogOut size={18} />

@@ -1,0 +1,45 @@
+environment:
+  name: dev
+  namespace: finopsiq-dev
+
+config:
+  secretName: finopsiq-dev-app-config
+
+ingress:
+  enabled: true
+  className: azure-application-gateway
+  hostname: ""
+  sslCertificateName: ""
+  sslRedirect: false
+
+services:
+  frontend:
+    image:
+      repository: ""
+      tag: dev
+    env:
+      NEXT_PUBLIC_API_URL: ""
+  apiGateway:
+    image:
+      repository: ""
+      tag: dev
+  auth:
+    image:
+      repository: ""
+      tag: dev
+  collection:
+    image:
+      repository: ""
+      tag: dev
+  processing:
+    image:
+      repository: ""
+      tag: dev
+  ai:
+    image:
+      repository: ""
+      tag: dev
+  notification:
+    image:
+      repository: ""
+      tag: dev

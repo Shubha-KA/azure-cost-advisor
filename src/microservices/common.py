@@ -20,6 +20,20 @@ def service_app(name: str, *, storage=None) -> FastAPI:
     app.state.metrics = ApiMetrics()
     app.add_middleware(ObservabilityMiddleware)
 
+    @app.on_event("startup")
+    def log_storage_config() -> None:
+        print(
+            "service_storage_config "
+            f"service={name} "
+            f"storage_provider={settings.storage_provider} "
+            f"cosmos_endpoint_present={bool(settings.cosmos_endpoint)} "
+            f"cosmos_database_present={bool(settings.cosmos_database)} "
+            f"azure_storage_account_url_present={bool(settings.azure_storage_account_url)} "
+            f"azure_storage_container_present={bool(settings.azure_storage_container)} "
+            f"storage_implementation={type(app.state.storage.tenants).__module__}",
+            flush=True,
+        )
+
     @app.get("/health/live")
     def live():
         return {"status": "alive", "service": name}

@@ -31,3 +31,4 @@ export async function api<T>(
 }
 
 export const loginUrl = `${API}/api/auth/login`;
+export const logoutUrl = `${API}/api/auth/logout`;

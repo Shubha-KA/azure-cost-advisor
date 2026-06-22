@@ -6,11 +6,16 @@ import logging
 import threading
 import time
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+
+import httpx
+import jwt
 
 from src.auth.customer_credentials import CustomerTenantCredentialFactory
 from src.collector.run import run_all as default_run_all
 from src.domain.context import OperationContext
+from src.domain.models import CollectionRun
 from src.events.contracts import EventType, PlatformEvent
 from src.observability import measure
 
@@ -62,6 +67,26 @@ class CollectionApplicationService:
                     continue_on_error=bool(body.get("continueOnError", True)),
                 )
         except Exception as exc:
+            completed_at = datetime.now(timezone.utc).isoformat()
+            self.app.state.storage.processing_metadata.upsert(
+                context.tenant_id,
+                {
+                    **CollectionRun(
+                        tenantId=context.tenant_id,
+                        subscriptionId=context.subscription_id,
+                        collectionRunId=context.collection_run_id,
+                        processingRunId=context.processing_run_id,
+                        correlationId=context.correlation_id,
+                        status="failed",
+                        startedAt=completed_at,
+                        completedAt=completed_at,
+                        errors=[str(exc)],
+                    ).model_dump(by_alias=True, mode="json"),
+                    "metadataType": "collectionRun",
+                    "startTime": completed_at,
+                    "endTime": completed_at,
+                },
+            )
             publisher.publish(
                 PlatformEvent(
                     eventType=EventType.HEALTH_CHECK_FAILED,
@@ -71,21 +96,64 @@ class CollectionApplicationService:
                 )
             )
             raise
-        publisher.publish(
-            PlatformEvent(
-                eventType=EventType.COLLECTION_COMPLETED,
-                **context.document_fields(),
-                producer="collection-service",
-                payload={
-                    "status": "partial" if report.errors else "completed",
-                    "recordsCollected": sum(
-                        item.record_count for item in report.results
-                    ),
-                    "errors": report.errors,
-                },
-            )
+        completed_event = PlatformEvent(
+            eventType=EventType.COLLECTION_COMPLETED,
+            **context.document_fields(),
+            producer="collection-service",
+            payload={
+                "status": "partial" if report.errors else "completed",
+                "recordsCollected": sum(item.record_count for item in report.results),
+                "errors": report.errors,
+            },
         )
+        publisher.publish(completed_event)
+        if not report.errors:
+            self._forward_event_for_local_compose(completed_event)
         return asdict(report)
+
+    def _forward_event_for_local_compose(self, event: PlatformEvent) -> None:
+        settings = self.app.state.settings
+        if settings.event_provider.lower() == "service_bus":
+            return
+        if not settings.processing_service_url:
+            return
+        token = jwt.encode(
+            {
+                "iss": "azure-cost-advisor",
+                "aud": settings.internal_api_audience,
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
+            },
+            settings.api_session_secret,
+            algorithm="HS256",
+        )
+        url = f"{settings.processing_service_url}/internal/events"
+        try:
+            response = httpx.post(
+                url,
+                json=event.model_dump(by_alias=True, mode="json"),
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=300,
+            )
+            if response.status_code >= 400:
+                logger.error(
+                    "processing_event_forward_failed url=%s status_code=%s response=%s",
+                    url,
+                    response.status_code,
+                    response.text[:1000],
+                )
+            else:
+                logger.info(
+                    "processing_event_forward_success url=%s status_code=%s",
+                    url,
+                    response.status_code,
+                )
+        except httpx.RequestError as exc:
+            logger.error(
+                "processing_event_forward_request_error url=%s exception=%s message=%s",
+                url,
+                type(exc).__name__,
+                str(exc),
+            )
 
     def run_scheduled_cycle(self) -> dict:
         attempted = 0

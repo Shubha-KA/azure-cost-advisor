@@ -111,8 +111,16 @@ class FinOpsAdvisor:
         if route == "recommendation":
             return self._answer_recommendation_query(question, classification)
 
+        if route == "idle_resources":
+            return self._answer_idle_resources_query(question, classification)
+
         if route == "utilization":
             return self._answer_utilization_query(question, classification)
+
+        if route in {"knowledge_advisory", "general_rag"}:
+            return self._answer_knowledge_advisory_query(
+                question, classification, chat_history
+            )
 
         if self.settings.openai_configured:
             try:
@@ -129,6 +137,42 @@ class FinOpsAdvisor:
 
         # 3️⃣ Default: rule‑based responses using processed CSV data.
         return self._rule_based_answer(question)
+
+    def _answer_knowledge_advisory_query(
+        self, question: str, classification: Any, chat_history: str = ""
+    ) -> str:
+        context = self._load_repository_context()
+        structured_facts = self._structured_facts_for_question(question, context)
+        try:
+            result = self.rag.invoke_hybrid(
+                question,
+                structured_facts=structured_facts,
+                chat_history=chat_history,
+                tenant_id=self.tenant_id,
+                subscription_id=self.subscription_ids[0],
+                operation=classification.route,
+            )
+            return self._with_debug(
+                result.get("answer", "").strip() or self._rule_based_answer(question),
+                [
+                    f"Detected intent: {classification.intent}",
+                    f"Route selected: {classification.route}",
+                    "Retrieval source: Azure AI Search + Cosmos structured facts",
+                    f"Retrieved documents: {len(result.get('context', []))}",
+                    f"Search latency ms: {round(result.get('search_latency_ms', 0), 2)}",
+                ],
+            )
+        except (RAGError, StorageConfigurationError) as exc:
+            logger.warning("Hybrid RAG failed, using structured fallback: %s", exc)
+            return self._with_debug(
+                self._structured_advisory_fallback(question, context),
+                [
+                    f"Detected intent: {classification.intent}",
+                    f"Route selected: {classification.route}",
+                    "Hybrid RAG failed before completion",
+                    f"Error: {exc}",
+                ],
+            )
 
     def generate_recommendations(self) -> dict[str, Any]:
         """Generate and persist a FinOps recommendations report."""
@@ -279,6 +323,109 @@ class FinOpsAdvisor:
                     advisor_payload.get("recommendations", [])
                 )
         return context
+
+    def _structured_facts_for_question(
+        self, question: str, context: dict[str, list[dict[str, Any]]]
+    ) -> str:
+        q = question.lower()
+        costs_by_id = self._cost_totals_by_resource(context["costFacts"])
+        resources_by_id = self._resources_by_id(context["resources"])
+        top_costs = self._top_cost_resources(costs_by_id, resources_by_id, limit=8)
+
+        focus_terms = {
+            term
+            for term in ("aks", "kubernetes", "network", "networking", "public ip", "vm", "virtual machine")
+            if term in q
+        }
+        if focus_terms:
+            focused = []
+            for item in top_costs:
+                haystack = f"{item.get('resource_name', '')} {item.get('resource_type', '')}".lower()
+                if any(term in haystack for term in focus_terms):
+                    focused.append(item)
+            if focused:
+                top_costs = focused + [item for item in top_costs if item not in focused]
+
+        recommendations_by_id: dict[str, list[dict[str, Any]]] = {}
+        for recommendation in context["recommendations"]:
+            resource_id = self._normalize_resource_id(
+                recommendation.get("resource_id") or recommendation.get("resourceId")
+            )
+            if resource_id:
+                recommendations_by_id.setdefault(resource_id, []).append(recommendation)
+
+        lines = [
+            f"Tenant: {self.tenant_id}",
+            f"Subscription: {self.subscription_ids[0] if self.subscription_ids else ''}",
+            "",
+            "Top cost resources from costFacts:",
+        ]
+        for item in top_costs[:8]:
+            recs = recommendations_by_id.get(item["resource_id"], [])
+            rec_text = ""
+            if recs:
+                rec = recs[0]
+                rec_text = (
+                    f"; recommendation: {rec.get('content') or rec.get('title')}; "
+                    f"estimated savings {format_money(float(rec.get('estimated_savings') or rec.get('estimatedSavings') or 0), rec.get('currency') or item.get('currency') or '')}/month"
+                )
+            lines.append(
+                f"- {item['resource_name']} ({item['resource_type']}), "
+                f"resource group {item.get('resource_group') or 'unknown'}, "
+                f"observed cost {format_money(item['cost'], item.get('currency') or '')}"
+                f"{rec_text}"
+            )
+
+        idle_or_savings = []
+        for resource in context["resources"]:
+            recommendation = str(
+                resource.get("recommendation")
+                or (resource.get("attributes") or {}).get("recommendation")
+                or ""
+            )
+            waste_level = str(resource.get("waste_level") or resource.get("wasteLevel") or "")
+            savings = float(resource.get("estimated_savings") or resource.get("estimatedSavings") or 0)
+            if recommendation or waste_level.upper() not in {"", "NONE"} or savings > 0:
+                idle_or_savings.append((savings, resource, recommendation, waste_level))
+
+        if idle_or_savings:
+            lines.extend(["", "Optimization and waste signals from resourceFacts:"])
+            for savings, resource, recommendation, waste_level in sorted(
+                idle_or_savings, key=lambda item: item[0], reverse=True
+            )[:8]:
+                lines.append(
+                    f"- {resource.get('resource_name') or resource.get('resourceName')} "
+                    f"({resource.get('resource_type') or resource.get('resourceType')}): "
+                    f"waste level {waste_level or 'unknown'}, "
+                    f"recommendation {recommendation or 'review'}, "
+                    f"estimated savings {format_money(savings, resource.get('savings_currency') or resource.get('savingsCurrency') or '')}/month"
+                )
+
+        if context.get("advisorFindings"):
+            lines.extend(["", "Azure Advisor findings:"])
+            for finding in context["advisorFindings"][:6]:
+                lines.append(
+                    f"- {finding.get('resourceName') or finding.get('impactedValue') or 'resource'}: "
+                    f"{finding.get('problem') or finding.get('solution') or finding.get('recommendationId')}"
+                )
+
+        return "\n".join(lines)
+
+    def _structured_advisory_fallback(
+        self, question: str, context: dict[str, list[dict[str, Any]]]
+    ) -> str:
+        facts = self._structured_facts_for_question(question, context)
+        if not facts.strip():
+            return (
+                "I do not have enough collected subscription facts to answer this advisory question yet. "
+                "Run collection and processing, then retry."
+            )
+        return (
+            "I can answer from the collected subscription facts, but the Azure AI Search knowledge layer "
+            "is not available right now.\n\n"
+            "Current grounded facts:\n"
+            f"{facts}"
+        )
 
     def _answer_cost_analysis(self, question: str, classification: Any) -> str:
         context = self._load_repository_context()
@@ -650,6 +797,271 @@ class FinOpsAdvisor:
             ],
         )
 
+    def _answer_idle_resources_query(self, question: str, classification: Any) -> str:
+        context = self._load_repository_context()
+        resources = context["resources"]
+        recommendations = context["recommendations"]
+        advisor_findings = context.get("advisorFindings", [])
+        resources_by_id = self._resources_by_id(resources)
+        costs_by_id = self._cost_totals_by_resource(context["costFacts"])
+
+        candidates: dict[str, dict[str, Any]] = {}
+
+        def merge(candidate: dict[str, Any]) -> None:
+            key = (
+                self._normalize_resource_id(candidate.get("resource_id"))
+                or str(candidate.get("resource_name") or "").lower()
+            )
+            if not key:
+                return
+            existing = candidates.get(key)
+            if not existing:
+                candidates[key] = candidate
+                return
+            if self._confidence_rank(candidate["confidence"]) > self._confidence_rank(existing["confidence"]):
+                existing["confidence"] = candidate["confidence"]
+                existing["reason"] = candidate["reason"]
+            existing["savings"] = max(float(existing.get("savings") or 0), float(candidate.get("savings") or 0))
+            existing["cost"] = max(float(existing.get("cost") or 0), float(candidate.get("cost") or 0))
+            if candidate.get("action") and candidate["action"] not in existing["action"]:
+                existing["action"] = f"{existing['action']}; {candidate['action']}"
+            existing["sources"] = sorted(set(existing.get("sources", [])) | set(candidate.get("sources", [])))
+
+        for recommendation in recommendations:
+            resource_id = self._normalize_resource_id(
+                recommendation.get("resource_id") or recommendation.get("resourceId")
+            )
+            resource = resources_by_id.get(resource_id, {})
+            action = str(
+                recommendation.get("content")
+                or recommendation.get("title")
+                or recommendation.get("recommendation")
+                or "Review optimization recommendation"
+            )
+            confidence, reason = self._idle_confidence_and_reason(
+                action=action,
+                resource=resource,
+                recommendation=recommendation,
+            )
+            if not confidence:
+                continue
+            cost = costs_by_id.get(resource_id, {})
+            merge(
+                {
+                    "resource_id": resource_id,
+                    "resource_name": resource.get("resource_name")
+                    or resource.get("resourceName")
+                    or self._resource_name_from_id(resource_id),
+                    "resource_type": resource.get("resource_type")
+                    or resource.get("resourceType")
+                    or "resource",
+                    "resource_group": resource.get("resource_group")
+                    or resource.get("resourceGroup")
+                    or "",
+                    "confidence": confidence,
+                    "reason": reason,
+                    "action": self._idle_action(action, resource),
+                    "savings": float(
+                        recommendation.get("estimated_savings")
+                        or recommendation.get("estimatedSavings")
+                        or resource.get("estimated_savings")
+                        or resource.get("estimatedSavings")
+                        or 0
+                    ),
+                    "savings_currency": recommendation.get("currency")
+                    or resource.get("savings_currency")
+                    or resource.get("savingsCurrency")
+                    or cost.get("currency")
+                    or "",
+                    "cost": float(cost.get("cost") or 0),
+                    "currency": cost.get("currency") or "",
+                    "sources": ["recommendations"],
+                }
+            )
+
+        for resource in resources:
+            attrs = resource.get("attributes") or {}
+            action = str(
+                resource.get("recommendation")
+                or attrs.get("recommendation")
+                or resource.get("rule_id")
+                or attrs.get("rule_id")
+                or ""
+            )
+            confidence, reason = self._idle_confidence_and_reason(
+                action=action,
+                resource=resource,
+                recommendation={},
+            )
+            if not confidence:
+                continue
+            resource_id = self._normalize_resource_id(
+                resource.get("resource_id") or resource.get("resourceId")
+            )
+            cost = costs_by_id.get(resource_id, {})
+            merge(
+                {
+                    "resource_id": resource_id,
+                    "resource_name": resource.get("resource_name")
+                    or resource.get("resourceName")
+                    or self._resource_name_from_id(resource_id),
+                    "resource_type": resource.get("resource_type")
+                    or resource.get("resourceType")
+                    or "resource",
+                    "resource_group": resource.get("resource_group")
+                    or resource.get("resourceGroup")
+                    or "",
+                    "confidence": confidence,
+                    "reason": reason,
+                    "action": self._idle_action(action, resource),
+                    "savings": float(
+                        resource.get("estimated_savings")
+                        or resource.get("estimatedSavings")
+                        or 0
+                    ),
+                    "savings_currency": resource.get("savings_currency")
+                    or resource.get("savingsCurrency")
+                    or cost.get("currency")
+                    or "",
+                    "cost": float(cost.get("cost") or 0),
+                    "currency": cost.get("currency") or "",
+                    "sources": ["processed facts"],
+                }
+            )
+
+        for finding in advisor_findings:
+            action = str(
+                finding.get("solution")
+                or finding.get("problem")
+                or finding.get("recommendation")
+                or finding.get("shortDescription")
+                or ""
+            )
+            resource_id = self._normalize_resource_id(
+                finding.get("resourceId")
+                or finding.get("resource_id")
+                or finding.get("impactedValue")
+                or finding.get("id")
+            )
+            resource = resources_by_id.get(resource_id, {})
+            confidence, reason = self._idle_confidence_and_reason(
+                action=action,
+                resource=resource,
+                recommendation=finding,
+            )
+            if not confidence:
+                continue
+            cost = costs_by_id.get(resource_id, {})
+            merge(
+                {
+                    "resource_id": resource_id,
+                    "resource_name": resource.get("resource_name")
+                    or resource.get("resourceName")
+                    or self._resource_name_from_id(resource_id),
+                    "resource_type": resource.get("resource_type")
+                    or resource.get("resourceType")
+                    or "resource",
+                    "resource_group": resource.get("resource_group")
+                    or resource.get("resourceGroup")
+                    or "",
+                    "confidence": confidence,
+                    "reason": reason,
+                    "action": self._idle_action(action, resource),
+                    "savings": 0.0,
+                    "savings_currency": cost.get("currency") or "",
+                    "cost": float(cost.get("cost") or 0),
+                    "currency": cost.get("currency") or "",
+                    "sources": ["advisor findings"],
+                }
+            )
+
+        ranked = sorted(
+            candidates.values(),
+            key=lambda item: (
+                self._confidence_rank(item["confidence"]),
+                float(item.get("savings") or 0),
+                float(item.get("cost") or 0),
+            ),
+            reverse=True,
+        )
+
+        if not ranked:
+            return self._with_debug(
+                "I do not see confirmed idle or unused resources in the current dataset. "
+                "No unattached public IPs, orphaned disks, unused NICs, or underutilized compute findings were available.",
+                [
+                    f"Detected intent: {classification.intent}",
+                    "Route selected: idle_resources",
+                    "Retrieval source: recommendations + advisor findings + processed facts + utilization facts",
+                    f"Recommendations analyzed: {len(recommendations)}",
+                    f"Resources analyzed: {len(resources)}",
+                    f"Advisor findings analyzed: {len(advisor_findings)}",
+                ],
+            )
+
+        sections = [
+            ("High Confidence Idle Resources", "High"),
+            ("Medium Confidence Underutilized Resources", "Medium"),
+            ("Low Confidence Suspected Waste", "Low"),
+        ]
+        lines = [
+            "Idle and Unused Resources",
+            "",
+            "I found resources that appear unused, orphaned, or underutilized. Confirm ownership before deleting production resources.",
+        ]
+        any_section = False
+        for title, confidence in sections:
+            rows = [item for item in ranked if item["confidence"] == confidence]
+            if not rows:
+                continue
+            any_section = True
+            lines.extend(["", title])
+            for index, item in enumerate(rows[:8], 1):
+                savings = ""
+                if float(item.get("savings") or 0) > 0:
+                    savings = (
+                        f" Estimated savings: "
+                        f"{format_money(item['savings'], item.get('savings_currency') or item.get('currency') or '')}/month."
+                    )
+                cost = ""
+                if float(item.get("cost") or 0) > 0:
+                    cost = f" Observed spend: {format_money(item['cost'], item.get('currency') or '')}."
+                resource_group = (
+                    f" Resource group: {item['resource_group']}."
+                    if item.get("resource_group")
+                    else ""
+                )
+                lines.append(
+                    f"{index}. {item['resource_name']} ({item['resource_type']}) - "
+                    f"{item['reason']} Recommended action: {item['action']}."
+                    f"{savings}{cost}{resource_group}"
+                )
+
+        if not any_section:
+            lines.append("")
+            lines.append("No actionable idle resources were found after correlation.")
+
+        total_savings: dict[str, float] = {}
+        for item in ranked:
+            currency = item.get("savings_currency") or item.get("currency") or ""
+            amount = float(item.get("savings") or 0)
+            if amount > 0:
+                total_savings[currency] = total_savings.get(currency, 0.0) + amount
+        if total_savings:
+            lines.extend(["", "Estimated Monthly Savings"])
+            for currency, amount in total_savings.items():
+                lines.append(f"- {format_money(amount, currency)}/month")
+
+        return self._with_debug(
+            "\n".join(lines),
+            [
+                f"Detected intent: {classification.intent}",
+                "Route selected: idle_resources",
+                "Retrieval source: recommendations + advisor findings + processed facts + utilization facts",
+                f"Idle candidates returned: {len(ranked)}",
+            ],
+        )
+
     def _top_spend_categories(
         self, facts: list[dict[str, Any]], limit: int = 8
     ) -> list[dict[str, Any]]:
@@ -698,6 +1110,121 @@ class FinOpsAdvisor:
                 }
             )
         return sorted(rows, key=lambda item: item["cost"], reverse=True)[:limit]
+
+    @staticmethod
+    def _confidence_rank(confidence: str) -> int:
+        return {"High": 3, "Medium": 2, "Low": 1}.get(confidence, 0)
+
+    def _idle_confidence_and_reason(
+        self,
+        *,
+        action: str,
+        resource: dict[str, Any],
+        recommendation: dict[str, Any],
+    ) -> tuple[str, str]:
+        attrs = resource.get("attributes") or {}
+        evidence = recommendation.get("evidence") or {}
+        resource_type = str(
+            resource.get("resource_type") or resource.get("resourceType") or ""
+        ).lower()
+        combined = " ".join(
+            str(value or "")
+            for value in (
+                action,
+                resource.get("recommendation"),
+                resource.get("rule_id"),
+                resource.get("ruleId"),
+                attrs.get("recommendation"),
+                attrs.get("rule_id"),
+                attrs.get("ruleId"),
+                resource.get("waste_level"),
+                resource.get("wasteLevel"),
+                evidence.get("wasteLevel"),
+                recommendation.get("category"),
+                recommendation.get("impact"),
+            )
+        ).lower()
+
+        high_patterns = (
+            "idle_public_ip",
+            "delete public ip",
+            "unused public ip",
+            "unattached public ip",
+            "public ip is not associated",
+            "unattached disk",
+            "orphaned disk",
+            "delete disk",
+            "unused nic",
+            "orphaned nic",
+            "not associated",
+            "not attached",
+            "not been associated",
+            "delete if it is no longer required",
+        )
+        if any(pattern in combined for pattern in high_patterns):
+            if "public" in combined or "publicip" in resource_type or "publicipaddresses" in resource_type:
+                return "High", "Public IP appears unattached or not associated with an active workload."
+            if "disk" in combined or "microsoft.compute/disks" in resource_type:
+                return "High", "Managed disk appears unattached and can likely be removed after validation."
+            if "nic" in combined or "networkinterfaces" in resource_type:
+                return "High", "Network interface appears unused or orphaned."
+            return "High", "Resource appears completely unused or orphaned."
+
+        medium_patterns = (
+            "aks_waste",
+            "enable autoscaler",
+            "underutilized",
+            "under utilized",
+            "low utilization",
+            "average utilization is low",
+            "node utilization",
+            "oversized_vm",
+            "rightsize",
+            "resize",
+        )
+        if any(pattern in combined for pattern in medium_patterns):
+            if "aks" in combined or "containerservice/managedclusters" in resource_type:
+                return "Medium", "AKS capacity is underutilized relative to provisioned compute."
+            return "Medium", "Compute resource shows low utilization compared with allocated capacity."
+
+        waste_level = str(
+            evidence.get("wasteLevel")
+            or resource.get("waste_level")
+            or resource.get("wasteLevel")
+            or ""
+        ).upper()
+        savings = float(
+            recommendation.get("estimated_savings")
+            or recommendation.get("estimatedSavings")
+            or resource.get("estimated_savings")
+            or resource.get("estimatedSavings")
+            or 0
+        )
+        if waste_level and waste_level != "NONE":
+            return "Low", f"Resource has a {waste_level.lower()} waste signal."
+        if savings > 0 and any(term in combined for term in ("waste", "optimize", "saving")):
+            return "Low", "Resource has a savings or waste recommendation that should be reviewed."
+
+        return "", ""
+
+    @staticmethod
+    def _idle_action(action: str, resource: dict[str, Any]) -> str:
+        text = action.strip()
+        resource_type = str(
+            resource.get("resource_type") or resource.get("resourceType") or ""
+        ).lower()
+        lowered = text.lower()
+        if "public ip" in lowered or "publicipaddresses" in resource_type:
+            return "Delete the public IP if it is no longer required, or associate it with an active workload"
+        if "disk" in lowered or "microsoft.compute/disks" in resource_type:
+            return "Detach validation is complete; delete the orphaned disk or snapshot it before removal"
+        if "nic" in lowered or "networkinterfaces" in resource_type:
+            return "Confirm no VM or private endpoint depends on it, then remove the unused NIC"
+        if "autoscaler" in lowered or "aks" in lowered or "containerservice/managedclusters" in resource_type:
+            return "Enable cluster autoscaler and review node pool sizing"
+        if "resize" in lowered or "rightsize" in lowered:
+            return "Rightsize or deallocate after validating workload requirements"
+        return text or "Review ownership and remove or rightsize if no active workload depends on it"
 
     @staticmethod
     def _priority_for_opportunity(opportunity: dict[str, Any]) -> str:

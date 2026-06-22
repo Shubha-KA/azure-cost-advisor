@@ -38,23 +38,26 @@ class TenantOnboardingService:
         correlation_id = str(uuid4())
         existing = self.storage.tenants.get(profile.tenant_id)
         is_new_tenant = existing is None
+        existing_users = {
+            item.user_id: item
+            for item in self.storage.tenant_users.list(profile.tenant_id)
+        }
+        tenant_display_name = self._tenant_display_name(
+            profile.tenant_id,
+            profile.email,
+            existing.display_name if existing else "",
+            [item.display_name for item in existing_users.values()],
+            profile.display_name,
+        )
         tenant = Tenant(
             tenantId=profile.tenant_id,
-            displayName=(
-                existing.display_name
-                if existing and existing.display_name
-                else profile.display_name or profile.tenant_id
-            ),
+            displayName=tenant_display_name,
             status="active" if existing else "pending",
             onboardingStatus=(
                 existing.onboarding_status if existing else "not_started"
             ),
             correlationId=correlation_id,
         )
-        existing_users = {
-            item.user_id: item
-            for item in self.storage.tenant_users.list(profile.tenant_id)
-        }
         existing_user = existing_users.get(profile.user_id)
         user = TenantUser(
             tenantId=profile.tenant_id,
@@ -74,6 +77,39 @@ class TenantOnboardingService:
         self.storage.tenants.upsert(profile.tenant_id, tenant)
         self.storage.tenant_users.upsert(profile.tenant_id, user)
         return is_new_tenant
+
+    @staticmethod
+    def _tenant_display_name(
+        tenant_id: str,
+        email: str,
+        existing_display_name: str,
+        existing_user_display_names: list[str],
+        current_user_display_name: str,
+    ) -> str:
+        """Return an organization label, never a user's display name."""
+
+        user_names = {
+            value.strip().lower()
+            for value in [current_user_display_name, *existing_user_display_names]
+            if value and value.strip()
+        }
+        existing = (existing_display_name or "").strip()
+        if existing and existing.lower() not in user_names:
+            return existing
+
+        domain = ""
+        if "@" in (email or ""):
+            domain = email.split("@", 1)[1].strip().lower()
+        if domain:
+            if domain.endswith(".onmicrosoft.com"):
+                label = domain.removesuffix(".onmicrosoft.com")
+            else:
+                label = domain.split(".", 1)[0]
+            label = label.replace("-", " ").replace("_", " ").strip()
+            if label:
+                return f"{label.title()} Tenant"
+
+        return f"Tenant {tenant_id[:8]}"
 
     def discover_subscriptions(
         self, session: AuthSession
@@ -161,13 +197,21 @@ class TenantOnboardingService:
                 "Mandatory Azure access checks must pass before onboarding completes"
             )
         existing = self.storage.tenants.get(session.profile.tenant_id)
+        display_name = self._tenant_display_name(
+            session.profile.tenant_id,
+            session.profile.email,
+            existing.display_name if existing else "",
+            [
+                item.display_name
+                for item in self.storage.tenant_users.list(
+                    session.profile.tenant_id
+                )
+            ],
+            session.profile.display_name,
+        )
         tenant = Tenant(
             tenantId=session.profile.tenant_id,
-            displayName=(
-                existing.display_name
-                if existing
-                else session.profile.display_name
-            ),
+            displayName=display_name,
             status="active",
             onboardingStatus="completed",
             correlationId=str(uuid4()),

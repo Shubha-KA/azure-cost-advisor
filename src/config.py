@@ -250,7 +250,11 @@ class Settings(BaseSettings):
     def azure_search_configured(self) -> bool:
         return bool(
             self.azure_search_endpoint
-            and (self.azure_search_api_key or self.use_managed_identity)
+            and (
+                self.azure_search_api_key
+                or self.use_managed_identity
+                or self.azure_credentials_configured
+            )
         )
 
     @property

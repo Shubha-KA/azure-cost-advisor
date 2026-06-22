@@ -6,7 +6,7 @@ import base64
 import hashlib
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Body, HTTPException, Request
@@ -14,7 +14,7 @@ from fastapi.responses import RedirectResponse
 
 from src.api.security import SESSION_COOKIE, SessionTokenService, get_identity, tenant_scope
 from src.auth.entra import EntraAuthService, AuthSession
-from src.domain.models import ServerSession, utc_now
+from src.domain.models import CollectionRun, ServerSession, utc_now
 from src.compliance.lifecycle import TenantLifecycleService
 from src.events.contracts import EventType, PlatformEvent
 from src.onboarding.service import TenantOnboardingService
@@ -62,6 +62,7 @@ class AuthApplicationService:
         return response
 
     def callback(self, request: Request):
+        self._cleanup_expired_sessions()
         try:
             flow = json.loads(
                 self.cipher().decrypt(
@@ -148,13 +149,71 @@ class AuthApplicationService:
             if self.settings.entra_auth_enabled
             else self.settings.frontend_url
         )
+        session_id = None
+        try:
+            # The auth service endpoint is proxied by the gateway. Cookies from
+            # the browser are still available on the request in the microservice
+            # path through FastAPI, but this method historically had no request
+            # argument. Kept for backwards-compatible direct calls below.
+            pass
+        except Exception:
+            session_id = None
+        response = RedirectResponse(url, status_code=303)
+        response.delete_cookie(SESSION_COOKIE)
+        response.delete_cookie("finops_sid")
+        return response
+
+    def logout_request(self, request: Request):
+        url = (
+            EntraAuthService(self.settings).logout_url()
+            if self.settings.entra_auth_enabled
+            else self.settings.frontend_url
+        )
+        session_id = request.cookies.get("finops_sid")
+        if session_id:
+            self.storage.sessions.delete(session_id)
         response = RedirectResponse(url, status_code=303)
         response.delete_cookie(SESSION_COOKIE)
         response.delete_cookie("finops_sid")
         return response
 
     def me(self, request: Request):
+        self._cleanup_expired_sessions()
         return get_identity(request).__dict__
+
+    def _cleanup_expired_sessions(self) -> int:
+        container = getattr(self.storage.sessions, "container", None)
+        if container is None:
+            return 0
+        try:
+            rows = list(
+                container.query_items(
+                    query="SELECT c.id, c.tenantId, c.expiresAt FROM c",
+                    enable_cross_partition_query=True,
+                )
+            )
+            now = utc_now()
+            expired = []
+            for row in rows:
+                marker = str(row.get("expiresAt") or "")
+                try:
+                    expires_at = datetime.fromisoformat(
+                        marker.replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    expires_at = now
+                if expires_at >= now:
+                    continue
+                expired.append(row)
+            for row in expired:
+                container.delete_item(
+                    item=row["id"],
+                    partition_key=row["tenantId"],
+                )
+            return len(expired)
+        except Exception as exc:
+            logger.warning("expired_session_cleanup_failed error=%s", exc)
+            return 0
 
     def tenants(self, request: Request):
         identity = get_identity(request)
@@ -275,18 +334,51 @@ class AuthApplicationService:
 
         details = []
         for subscription in subscriptions:
+            metadata = self.storage.processing_metadata.list_latest(
+                tenant_id, subscription.subscription_id
+            )
             runs = [
-                item for item in self.storage.processing_metadata.list_latest(
-                    tenant_id, subscription.subscription_id
-                )
+                item for item in metadata
                 if item.get("metadataType") == "collectionRun"
             ]
+            runs.sort(key=self._collection_status_timestamp, reverse=True)
             latest = runs[0] if runs else None
+            processing_runs = [
+                item for item in metadata
+                if item.get("metadataType") == "processingRun"
+            ]
+            processing_runs.sort(
+                key=self._collection_status_timestamp, reverse=True
+            )
+            completed_pipeline = self._latest_completed_pipeline(
+                runs, processing_runs
+            )
+            latest_pipeline_time = (
+                completed_pipeline["pipelineCompletedAt"]
+                if completed_pipeline
+                else datetime.min.replace(tzinfo=timezone.utc)
+            )
+            latest_collection_time = (
+                self._collection_status_timestamp(latest)
+                if latest
+                else datetime.min.replace(tzinfo=timezone.utc)
+            )
             details.append(
                 {
                     "subscriptionId": subscription.subscription_id,
                     "displayName": subscription.display_name,
-                    "collection": latest,
+                    "collection": (
+                        completed_pipeline["collection"]
+                        if completed_pipeline
+                        and latest_pipeline_time >= latest_collection_time
+                        else latest
+                    ),
+                    "processing": (
+                        completed_pipeline["processing"]
+                        if completed_pipeline
+                        and latest_pipeline_time >= latest_collection_time
+                        else None
+                    ),
                 }
             )
             if latest is None:
@@ -301,6 +393,8 @@ class AuthApplicationService:
                     "message": "Initial collection is running.",
                     "subscriptions": details,
                 }
+            if completed_pipeline and latest_pipeline_time >= latest_collection_time:
+                continue
             if latest.get("status") != "completed":
                 return {
                     "status": "collection_failed",
@@ -308,6 +402,11 @@ class AuthApplicationService:
                     "errors": latest.get("errors", []),
                     "subscriptions": details,
                 }
+            return {
+                "status": "collecting",
+                "message": "Initial processing has not completed yet.",
+                "subscriptions": details,
+            }
 
         return {"status": "ready", "subscriptions": details}
 
@@ -362,12 +461,15 @@ class AuthApplicationService:
         ]
         if not subscription_ids:
             raise HTTPException(400, "No validated selected subscriptions to collect")
-        await self._trigger_collections(identity.tenant_id, subscription_ids)
+        import asyncio
+
+        asyncio.create_task(
+            self._trigger_collections(identity.tenant_id, subscription_ids)
+        )
         return {"success": True, "subscriptionIds": subscription_ids}
 
     async def _trigger_collections(self, tenant_id: str, subscription_ids: list[str]):
         import jwt
-        from datetime import datetime, timedelta, timezone
 
         now = datetime.now(timezone.utc)
         internal_token = jwt.encode(
@@ -380,10 +482,12 @@ class AuthApplicationService:
             algorithm="HS256",
         )
         headers = {"Authorization": f"Bearer {internal_token}"}
-        async with httpx.AsyncClient(timeout=10) as client:
+        timeout = httpx.Timeout(300.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             for sub_id in subscription_ids:
                 url = f"{self.settings.collection_service_url}/internal/collections"
                 payload = {"tenantId": tenant_id, "subscriptionId": sub_id}
+                trigger_started_at = datetime.now(timezone.utc)
                 try:
                     logger.info(
                         "collection_trigger_start url=%s payload=%s",
@@ -392,6 +496,12 @@ class AuthApplicationService:
                     )
                     response = await client.post(url, json=payload, headers=headers)
                     if response.status_code >= 400:
+                        self._record_collection_trigger_failure_if_missing(
+                            tenant_id,
+                            sub_id,
+                            f"Collection trigger failed with HTTP {response.status_code}: {response.text[:500]}",
+                            trigger_started_at,
+                        )
                         logger.error(
                             "collection_trigger_failed url=%s status_code=%s response=%s",
                             url,
@@ -406,6 +516,12 @@ class AuthApplicationService:
                             response.text[:1000],
                         )
                 except httpx.RequestError as exc:
+                    if not isinstance(exc, httpx.ReadTimeout):
+                        self._record_collection_trigger_failure(
+                            tenant_id,
+                            sub_id,
+                            f"Collection trigger request failed: {type(exc).__name__}: {exc}",
+                        )
                     logger.error(
                         "collection_trigger_request_error url=%s payload=%s exception=%s message=%s",
                         url,
@@ -413,3 +529,107 @@ class AuthApplicationService:
                         type(exc).__name__,
                         str(exc),
                     )
+
+    def _record_collection_trigger_failure(
+        self, tenant_id: str, subscription_id: str, error: str
+    ) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        run_id = str(uuid.uuid4())
+        processing_run_id = str(uuid.uuid4())
+        correlation_id = str(uuid.uuid4())
+        self.storage.processing_metadata.upsert(
+            tenant_id,
+            {
+                **CollectionRun(
+                    tenantId=tenant_id,
+                    subscriptionId=subscription_id,
+                    collectionRunId=run_id,
+                    processingRunId=processing_run_id,
+                    correlationId=correlation_id,
+                    status="failed",
+                    startedAt=timestamp,
+                    completedAt=timestamp,
+                    errors=[error],
+                ).model_dump(by_alias=True, mode="json"),
+                "metadataType": "collectionRun",
+                "startTime": timestamp,
+                "endTime": timestamp,
+            },
+        )
+
+    def _record_collection_trigger_failure_if_missing(
+        self,
+        tenant_id: str,
+        subscription_id: str,
+        error: str,
+        trigger_started_at: datetime,
+    ) -> None:
+        for item in self.storage.processing_metadata.list_latest(
+            tenant_id, subscription_id
+        ):
+            if item.get("metadataType") != "collectionRun":
+                continue
+            marker = (
+                item.get("startedAt")
+                or item.get("startTime")
+                or item.get("completedAt")
+                or item.get("endTime")
+            )
+            if self._parse_metadata_timestamp(marker) >= trigger_started_at:
+                return
+        self._record_collection_trigger_failure(tenant_id, subscription_id, error)
+
+    def _collection_status_timestamp(self, item: dict) -> datetime:
+        marker = (
+            item.get("completedAt")
+            or item.get("endTime")
+            or item.get("startedAt")
+            or item.get("startTime")
+        )
+        return self._parse_metadata_timestamp(marker)
+
+    def _latest_completed_pipeline(
+        self, collection_runs: list[dict], processing_runs: list[dict]
+    ) -> dict | None:
+        processing_by_collection = {
+            item.get("collectionRunId"): item
+            for item in processing_runs
+            if item.get("status") == "completed" and item.get("collectionRunId")
+        }
+        candidates = []
+        for collection in collection_runs:
+            if collection.get("status") != "completed":
+                continue
+            processing = processing_by_collection.get(collection.get("collectionRunId"))
+            if not processing:
+                continue
+            pipeline_completed_at = max(
+                self._collection_status_timestamp(collection),
+                self._collection_status_timestamp(processing),
+            )
+            candidates.append(
+                {
+                    "collection": collection,
+                    "processing": processing,
+                    "pipelineCompletedAt": pipeline_completed_at,
+                }
+            )
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item["pipelineCompletedAt"])
+
+    @staticmethod
+    def _parse_metadata_timestamp(value: object) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            text = str(value or "")
+            if not text:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)

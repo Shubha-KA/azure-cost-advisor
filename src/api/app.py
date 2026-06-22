@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import math
 from types import SimpleNamespace
 from typing import Any, Callable
+import uuid
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,7 @@ from src.auth.customer_credentials import CustomerTenantCredentialFactory
 from src.auth.entra import EntraAuthService
 from src.config import Settings, get_settings
 from src.dashboard.data_loader import DashboardDataLoader
+from src.domain.models import ServerSession
 from src.onboarding.service import TenantOnboardingService
 from src.storage.factory import create_storage_provider
 
@@ -113,6 +115,36 @@ def _serialize(item) -> dict[str, Any]:
     }
 
 
+def _cleanup_expired_sessions(storage) -> None:
+    sessions = getattr(storage, "sessions", None)
+    container = getattr(sessions, "container", None)
+    if not sessions or not container:
+        return
+    now = datetime.now(timezone.utc)
+    try:
+        rows = list(
+            container.query_items(
+                query="SELECT c.id, c.expiresAt FROM c",
+                enable_cross_partition_query=True,
+            )
+        )
+    except Exception:
+        return
+    for row in rows:
+        expires_at = str(row.get("expiresAt") or "")
+        if not expires_at:
+            continue
+        try:
+            parsed = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed <= now:
+            try:
+                sessions.delete(str(row.get("id")))
+            except Exception:
+                continue
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -176,6 +208,7 @@ def create_app(
 
     @app.get("/api/auth/callback")
     def auth_callback(request: Request):
+        _cleanup_expired_sessions(storage)
         params = dict(request.query_params)
         flow = request.app.state.auth_flows.pop(str(params.get("state", "")), None)
         if not flow:
@@ -201,6 +234,16 @@ def create_app(
                 "roles": roles,
             }
         )
+        session_id = str(uuid.uuid4())
+        storage.sessions.upsert(
+            ServerSession(
+                sessionId=session_id,
+                tenantId=session.profile.tenant_id,
+                userId=session.profile.user_id,
+                authSession=session.model_dump(by_alias=True, mode="json"),
+                expiresAt=session.expires_at,
+            )
+        )
         response = RedirectResponse(f"{settings.frontend_url}/dashboard")
         response.set_cookie(
             SESSION_COOKIE,
@@ -210,10 +253,22 @@ def create_app(
             samesite="lax",
             max_age=8 * 60 * 60,
         )
+        response.set_cookie(
+            "finops_sid",
+            session_id,
+            httponly=True,
+            secure=settings.api_session_cookie_secure,
+            samesite="lax",
+            max_age=8 * 60 * 60,
+        )
         return response
 
+    @app.get("/api/auth/logout")
     @app.post("/api/auth/logout")
     def logout(request: Request):
+        session_id = request.cookies.get("finops_sid", "")
+        if session_id:
+            storage.sessions.delete(session_id)
         url = (
             request.app.state.auth_factory(settings).logout_url()
             if settings.entra_auth_enabled
@@ -221,12 +276,17 @@ def create_app(
         )
         response = RedirectResponse(url, status_code=303)
         response.delete_cookie(SESSION_COOKIE)
+        response.delete_cookie("finops_sid")
         return response
 
     @app.get("/api/auth/me")
     def me(request: Request):
+        _cleanup_expired_sessions(storage)
         identity = get_identity(request)
         return {
+            "tenant_id": identity.tenant_id,
+            "user_id": identity.user_id,
+            "display_name": identity.display_name,
             "tenantId": identity.tenant_id,
             "userId": identity.user_id,
             "email": identity.email,

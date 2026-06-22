@@ -11,7 +11,7 @@ from uuid import uuid4
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import AzureChatOpenAI
 
-from src.ai.prompts import RAG_PROMPT, RECOMMENDATIONS_PROMPT
+from src.ai.prompts import HYBRID_COPILOT_PROMPT, RAG_PROMPT, RECOMMENDATIONS_PROMPT
 from src.config import Settings, get_settings
 from src.search.factory import create_search_provider
 from src.search.knowledge import KnowledgeService
@@ -113,6 +113,27 @@ class RAGPipeline:
         results = self._get_search_provider().search(
             tenant_id, subscription_id, query, top=k
         )
+        logger.warning(
+            "azure_ai_search_retrieval provider=%s tenant_id=%s subscription_id=%s "
+            "query=%r top=%d retrieved=%d documents=%s",
+            self.settings.search_provider,
+            tenant_id,
+            subscription_id,
+            query,
+            k,
+            len(results),
+            [
+                {
+                    "id": result.metadata.get("id"),
+                    "type": result.metadata.get("documentType"),
+                    "title": result.metadata.get("title")
+                    or result.metadata.get("resourceName")
+                    or result.metadata.get("resourceId"),
+                    "score": round(result.score, 4),
+                }
+                for result in results
+            ],
+        )
         return [
             {
                 "content": result.content,
@@ -174,6 +195,61 @@ class RAGPipeline:
             "latency_ms": latency,
             "search_latency_ms": search_latency,
             "model": self.settings.azure_openai_deployment_name,
+        }
+
+    def invoke_hybrid(
+        self,
+        query: str,
+        *,
+        structured_facts: str,
+        chat_history: str = "",
+        k: int = 8,
+        tenant_id: str | None = None,
+        subscription_id: str | None = None,
+        operation: str = "knowledge_advisory",
+    ) -> dict[str, Any]:
+        tenant_id = tenant_id or self.settings.effective_tenant_id
+        subscription_id = (
+            subscription_id or self.settings.effective_subscription_id
+        )
+        started = time.perf_counter()
+        search_started = time.perf_counter()
+        documents = self.retrieve(
+            query,
+            k,
+            tenant_id=tenant_id,
+            subscription_id=subscription_id,
+        )
+        search_latency = (time.perf_counter() - search_started) * 1000
+        search_context = "\n\n".join(item["content"] for item in documents)
+        messages = HYBRID_COPILOT_PROMPT.format_messages(
+            search_context=search_context or "No matching Azure AI Search documents.",
+            structured_facts=structured_facts or "No structured subscription facts available.",
+            chat_history=chat_history or "None",
+            input=query,
+        )
+        response = self._get_llm().invoke(messages)
+        latency = (time.perf_counter() - started) * 1000
+        usage = _token_usage(response)
+        answer = str(getattr(response, "content", response))
+        self._persist_execution(
+            tenant_id,
+            subscription_id,
+            operation,
+            latency,
+            search_latency,
+            len(documents),
+            usage,
+        )
+        return {
+            "answer": answer,
+            "context": documents,
+            "source": "hybrid_cosmos_ai_search_openai",
+            "usage": usage,
+            "latency_ms": latency,
+            "search_latency_ms": search_latency,
+            "model": self.settings.azure_openai_deployment_name,
+            "structured_facts": structured_facts,
         }
 
     def generate_recommendations(
